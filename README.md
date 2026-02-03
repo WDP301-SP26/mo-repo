@@ -1,4 +1,4 @@
-# My Expo App
+# JiHub App
 
 A React Native application built with Expo and NativeWind (TailwindCSS).
 

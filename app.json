@@ -1,7 +1,8 @@
 {
   "expo": {
-    "name": "my-expo-app",
-    "slug": "my-expo-app",
+    "name": "jihub-app",
+    "slug": "jihub-app",
+    "scheme": "jihub",
     "version": "1.0.0",
 
     "web": {
