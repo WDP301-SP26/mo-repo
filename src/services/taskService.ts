@@ -7,6 +7,7 @@ export type TaskPriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 export interface TaskItem {
   id: string;
   key?: string;
+  jira_issue_key?: string;
   group_id: string;
   title: string;
   description?: string;
@@ -14,6 +15,8 @@ export interface TaskItem {
   priority: TaskPriority;
   assignee_id?: string;
   assignee_name?: string;
+  jira_sync_status?: 'SUCCESS' | 'FAILED' | 'SKIPPED';
+  jira_sync_reason?: string;
   due_at?: string;
   created_at?: string;
   updated_at?: string;
@@ -35,6 +38,7 @@ type BeTaskPriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
 interface BeTaskItem {
   id: string;
   key?: string | null;
+  jira_issue_key?: string | null;
   group_id: string;
   title: string;
   description?: string | null;
@@ -42,6 +46,8 @@ interface BeTaskItem {
   priority: BeTaskPriority;
   assignee_id?: string | null;
   assignee_name?: string | null;
+  jira_sync_status?: 'SUCCESS' | 'FAILED' | 'SKIPPED';
+  jira_sync_reason?: string | null;
   due_at?: string | null;
   created_at?: string;
   updated_at?: string;
@@ -129,6 +135,7 @@ const normalizeDueAtForRequest = (dueAt?: string): string | undefined => {
 const mapTaskFromBe = (task: BeTaskItem): TaskItem => ({
   id: task.id,
   key: task.key || undefined,
+  jira_issue_key: task.jira_issue_key || undefined,
   group_id: task.group_id,
   title: task.title,
   description: task.description || undefined,
@@ -136,6 +143,8 @@ const mapTaskFromBe = (task: BeTaskItem): TaskItem => ({
   priority: mapPriorityFromBe(task.priority),
   assignee_id: task.assignee_id || undefined,
   assignee_name: task.assignee_name || undefined,
+  jira_sync_status: task.jira_sync_status || undefined,
+  jira_sync_reason: task.jira_sync_reason || undefined,
   due_at: task.due_at || undefined,
   created_at: task.created_at,
   updated_at: task.updated_at,
@@ -212,7 +221,7 @@ export const createTask = async (payload: CreateTaskPayload): Promise<TaskItem> 
     ENDPOINTS.TASKS.CREATE,
     mapCreatePayloadToBe(payload),
     {
-      expectedErrorStatuses: [400, 404],
+      expectedErrorStatuses: [400, 401, 403, 404],
     } as any
   );
 
@@ -228,7 +237,7 @@ export const updateTask = async (taskId: string, payload: UpdateTaskPayload): Pr
     ENDPOINTS.TASKS.UPDATE(taskId),
     mapUpdatePayloadToBe(payload),
     {
-      expectedErrorStatuses: [400, 404],
+      expectedErrorStatuses: [400, 401, 403, 404],
     } as any
   );
 

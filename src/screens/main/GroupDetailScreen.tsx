@@ -41,7 +41,7 @@ import {
   type TaskPriority,
   type TaskStatus,
 } from '@/services/taskService';
-import { showSuccess, showError, showInfo } from '@/utils/toast';
+import { showSuccess, showError, showInfo, showWarning } from '@/utils/toast';
 import type { GroupDetail, GroupMember, MembershipRole } from '@/types/group';
 import type { ContributorStat, GroupRepo } from '@/types/github';
 import type { JiraTaskStatus } from '@/types/activity';
@@ -49,6 +49,10 @@ import { JIRA_STATUS_CONFIG } from '@/types/activity';
 import type { RootStackParamList } from '@/navigation/AppNavigator';
 import { debugLog } from '@/utils/debug/log';
 import { useUserStore } from '@/utils/stores/userStore';
+import {
+  getTaskActionErrorCode,
+  mapTaskActionErrorToMessage,
+} from '@/utils/task/errorMap';
 
 // ==================== Constants ====================
 
@@ -497,7 +501,9 @@ const GroupDetailScreen = () => {
       setTaskFormVisible(false);
       fetchTasks(true);
     } catch (error: any) {
-      setTaskFormError(getApiErrorMessage(error, 'Failed to save task.'));
+      setTaskFormError(
+        mapTaskActionErrorToMessage(error, getApiErrorMessage(error, 'Failed to save task.'))
+      );
     } finally {
       setSavingTask(false);
     }
@@ -535,27 +541,19 @@ const GroupDetailScreen = () => {
       );
       fetchTasks(true);
     } catch (error: any) {
-      showError(error?.response?.data?.message || 'Failed to update task status');
+      showError(mapTaskActionErrorToMessage(error, 'Failed to update task status.'), 'Task Update');
     }
-  };
-
-  const alertJiraAccessRequired = () => {
-    Alert.alert(
-      'Jira Access Required',
-      `You are not a member of the Jira project "${group?.jira_project_key}". Ask your leader to add you on Jira before performing this action.`,
-      [{ text: 'OK' }]
-    );
   };
 
   const handleMemberMarkDone = async (task: TaskItem) => {
     if (group?.jira_project_key) {
       if (memberJiraAccess === false) {
-        alertJiraAccessRequired();
-        return;
-      }
-      if (memberJiraAccess !== true) {
-        showInfo('Checking Jira assignment permission. Please try again in a moment.');
-        return;
+        showWarning(
+          'Your Jira access looks limited. The server will verify project membership before applying this change.',
+          'Jira Check'
+        );
+      } else if (memberJiraAccess !== true) {
+        showInfo('Server-side Jira membership verification will run before updating this task.');
       }
     }
     try {
@@ -563,7 +561,10 @@ const GroupDetailScreen = () => {
       showSuccess(group?.jira_project_key ? 'Marked done · Jira synced' : 'Task marked as done');
       fetchTasks(true);
     } catch (error: any) {
-      showError(error?.response?.data?.message || 'Failed to update task');
+      showError(
+        mapTaskActionErrorToMessage(error, 'Failed to update task status.'),
+        getTaskActionErrorCode(error) === 'JIRA_ACCOUNT_NOT_LINKED' ? 'Reconnect Jira' : 'Task Update'
+      );
     }
   };
 
@@ -571,12 +572,12 @@ const GroupDetailScreen = () => {
     if (!currentUser?.id) return;
     if (group?.jira_project_key) {
       if (memberJiraAccess === false) {
-        alertJiraAccessRequired();
-        return;
-      }
-      if (memberJiraAccess !== true) {
-        showInfo('Checking Jira assignment permission. Please try again in a moment.');
-        return;
+        showWarning(
+          'Your Jira access looks limited. The server will verify project membership before assigning this task.',
+          'Jira Check'
+        );
+      } else if (memberJiraAccess !== true) {
+        showInfo('Server-side Jira membership verification will run before assigning this task.');
       }
     }
     try {
@@ -584,7 +585,10 @@ const GroupDetailScreen = () => {
       showSuccess('Task claimed');
       fetchTasks(true);
     } catch (error: any) {
-      showError(error?.response?.data?.message || 'Failed to claim task');
+      showError(
+        mapTaskActionErrorToMessage(error, 'Failed to claim task.'),
+        getTaskActionErrorCode(error) === 'JIRA_ACCOUNT_NOT_LINKED' ? 'Reconnect Jira' : 'Task Claim'
+      );
     }
   };
 
