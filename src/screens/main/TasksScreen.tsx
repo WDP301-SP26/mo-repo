@@ -4,6 +4,7 @@ import {
   FlatList,
   InteractionManager,
   RefreshControl,
+  ScrollView,
   StatusBar,
   Text,
   TouchableOpacity,
@@ -16,6 +17,8 @@ import { Feather } from '@/components/icons';
 import { MaterialIcons } from '@/components/icons';
 import { getMyGroups } from '@/services/studentService';
 import { getTasks, type TaskItem, type TaskPriority, type TaskStatus } from '@/services/taskService';
+import { getCheckpoints, type Checkpoint } from '@/services/checkpointService';
+import { getCurrentSemester } from '@/services/semesterService';
 import type { Group } from '@/types/group';
 import type { RootStackParamList } from '@/navigation/AppNavigator';
 import { showError } from '@/utils/toast';
@@ -100,6 +103,8 @@ const TasksScreen = () => {
 
   const [groups, setGroups] = useState<Group[]>([]);
   const [assignedTasks, setAssignedTasks] = useState<AssignedTask[]>([]);
+  const [checkpoints, setCheckpoints] = useState<Checkpoint[]>([]);
+  const [groupByCheckpoint, setGroupByCheckpoint] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [activeFilter, setActiveFilter] = useState<FilterKey>('ACTIVE');
@@ -115,7 +120,10 @@ const TasksScreen = () => {
 
     try {
       setLoading(true);
-      const data = await getMyGroups();
+      const [data, semester] = await Promise.all([
+        getMyGroups(),
+        getCurrentSemester().catch(() => null),
+      ]);
       setGroups(data);
 
       if (data.length === 0) {
@@ -136,6 +144,11 @@ const TasksScreen = () => {
       );
 
       setAssignedTasks(sortAssignedTasks(taskBatches.flat()));
+
+      if (semester) {
+        const cps = await getCheckpoints(semester.id).catch(() => []);
+        setCheckpoints(cps);
+      }
     } catch (error: any) {
       showError(error?.response?.data?.message || 'Failed to load your tasks');
     } finally {
@@ -202,7 +215,20 @@ const TasksScreen = () => {
       <StatusBar barStyle="light-content" backgroundColor="#101922" />
 
       <View className="px-4 pb-2 pt-3">
-        <Text className="text-2xl font-black text-white">My Tasks</Text>
+        <View className="flex-row items-center justify-between">
+          <Text className="text-2xl font-black text-white">My Tasks</Text>
+          {checkpoints.length > 0 && (
+            <TouchableOpacity
+              onPress={() => setGroupByCheckpoint((v) => !v)}
+              className={`flex-row items-center gap-1.5 rounded-xl px-3 py-2 ${groupByCheckpoint ? 'bg-[#7C3AED]' : 'bg-[#1A2332]'}`}
+              activeOpacity={0.8}>
+              <Feather name="flag" size={13} color={groupByCheckpoint ? '#fff' : '#94A3B8'} />
+              <Text className="text-xs font-semibold" style={{ color: groupByCheckpoint ? '#fff' : '#94A3B8' }}>
+                Checkpoints
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
         <Text className="mt-1 text-sm text-gray-400">
           {summary.active} active of {summary.total} assigned tasks.
         </Text>
@@ -225,24 +251,162 @@ const TasksScreen = () => {
         </View>
       </View>
 
-      <View className="mb-2 flex-row px-4">
-        {FILTERS.map((filter) => {
-          const selected = activeFilter === filter.key;
+      {!groupByCheckpoint && (
+        <View className="mb-2 flex-row px-4">
+          {FILTERS.map((filter) => {
+            const selected = activeFilter === filter.key;
 
-          return (
-            <TouchableOpacity
-              key={filter.key}
-              onPress={() => setActiveFilter(filter.key)}
-              activeOpacity={0.85}
-              className="mr-2 rounded-full px-3 py-2"
-              style={{ backgroundColor: selected ? '#1D4ED8' : '#1A2332' }}>
-              <Text className="text-xs font-semibold" style={{ color: selected ? '#DBEAFE' : '#94A3B8' }}>
-                {filter.label}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
+            return (
+              <TouchableOpacity
+                key={filter.key}
+                onPress={() => setActiveFilter(filter.key)}
+                activeOpacity={0.85}
+                className="mr-2 rounded-full px-3 py-2"
+                style={{ backgroundColor: selected ? '#1D4ED8' : '#1A2332' }}>
+                <Text className="text-xs font-semibold" style={{ color: selected ? '#DBEAFE' : '#94A3B8' }}>
+                  {filter.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      )}
+
+      {/* ── Checkpoint grouped view ──────────────────────────────── */}
+      {groupByCheckpoint ? (
+        <ScrollView
+          className="flex-1"
+          contentContainerStyle={{ paddingBottom: 100 }}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor="#7C3AED"
+              colors={['#7C3AED']}
+            />
+          }>
+          {checkpoints.map((cp) => {
+            const cpTasks = assignedTasks.filter(
+              (item) => (item.task as any).checkpoint_id === cp.id
+            );
+            const done = cpTasks.filter((i) => i.task.status === 'DONE').length;
+            const pct = cpTasks.length > 0 ? Math.round((done / cpTasks.length) * 100) : 0;
+
+            return (
+              <View key={cp.id} className="mb-4 mx-4">
+                {/* Checkpoint header */}
+                <View className="mb-2 rounded-2xl bg-[#1A2332] px-4 py-3">
+                  <View className="flex-row items-center justify-between">
+                    <View className="flex-1 pr-3">
+                      <Text className="text-sm font-bold text-white">{cp.title}</Text>
+                      <View className="mt-0.5 flex-row items-center gap-1.5">
+                        <Feather name="calendar" size={11} color="#7C3AED" />
+                        <Text className="text-xs text-[#A78BFA]">
+                          Week {cp.week_start}–{cp.week_end}
+                        </Text>
+                      </View>
+                    </View>
+                    <Text className="text-xs font-bold text-gray-400">
+                      {done}/{cpTasks.length}
+                    </Text>
+                  </View>
+                  {cpTasks.length > 0 && (
+                    <View className="mt-2 h-1.5 overflow-hidden rounded-full bg-[#243447]">
+                      <View
+                        className="h-full rounded-full bg-[#7C3AED]"
+                        style={{ width: `${pct}%` }}
+                      />
+                    </View>
+                  )}
+                  {!!cp.description && (
+                    <Text className="mt-2 text-xs leading-4 text-gray-500" numberOfLines={2}>
+                      {cp.description}
+                    </Text>
+                  )}
+                </View>
+
+                {cpTasks.length === 0 ? (
+                  <View className="items-center rounded-2xl bg-[#1A2332] py-4">
+                    <Text className="text-xs text-gray-500">No tasks in this checkpoint yet.</Text>
+                  </View>
+                ) : (
+                  cpTasks.map((item) => {
+                    const due = getDueInfo(item.task.due_at, item.task.status);
+                    return (
+                      <TouchableOpacity
+                        key={item.task.id}
+                        onPress={() => navigation.navigate('GroupDetail', { groupId: item.group.id })}
+                        activeOpacity={0.85}
+                        className="mb-2 rounded-2xl bg-[#1A2332] p-4">
+                        <Text className="text-sm font-bold text-white" numberOfLines={1}>
+                          {item.task.title}
+                        </Text>
+                        <View className="mt-1.5 flex-row items-center gap-2">
+                          <View
+                            className="rounded-md px-2 py-0.5"
+                            style={{ backgroundColor: STATUS_STYLES[item.task.status].bg }}>
+                            <Text className="text-[10px] font-semibold" style={{ color: STATUS_STYLES[item.task.status].text }}>
+                              {STATUS_LABELS[item.task.status]}
+                            </Text>
+                          </View>
+                          <View className="flex-row items-center gap-1">
+                            <Feather name="calendar" size={11} color={due.color} />
+                            <Text className="text-xs" style={{ color: due.color }}>
+                              {due.label}
+                            </Text>
+                          </View>
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })
+                )}
+              </View>
+            );
+          })}
+
+          {/* Uncategorized tasks */}
+          {(() => {
+            const uncategorized = assignedTasks.filter(
+              (item) => !(item.task as any).checkpoint_id
+            );
+            if (uncategorized.length === 0) return null;
+            return (
+              <View className="mb-4 mx-4">
+                <Text className="mb-2 text-xs font-semibold uppercase tracking-wider text-gray-500">
+                  Uncategorized
+                </Text>
+                {uncategorized.map((item) => {
+                  const due = getDueInfo(item.task.due_at, item.task.status);
+                  return (
+                    <TouchableOpacity
+                      key={item.task.id}
+                      onPress={() => navigation.navigate('GroupDetail', { groupId: item.group.id })}
+                      activeOpacity={0.85}
+                      className="mb-2 rounded-2xl bg-[#1A2332] p-4">
+                      <Text className="text-sm font-bold text-white" numberOfLines={1}>
+                        {item.task.title}
+                      </Text>
+                      <View className="mt-1.5 flex-row items-center gap-2">
+                        <View
+                          className="rounded-md px-2 py-0.5"
+                          style={{ backgroundColor: STATUS_STYLES[item.task.status].bg }}>
+                          <Text className="text-[10px] font-semibold" style={{ color: STATUS_STYLES[item.task.status].text }}>
+                            {STATUS_LABELS[item.task.status]}
+                          </Text>
+                        </View>
+                        <View className="flex-row items-center gap-1">
+                          <Feather name="calendar" size={11} color={due.color} />
+                          <Text className="text-xs" style={{ color: due.color }}>{due.label}</Text>
+                        </View>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            );
+          })()}
+        </ScrollView>
+      ) : (
 
       <FlatList
         data={visibleTasks}
@@ -341,6 +505,7 @@ const TasksScreen = () => {
         }
         contentContainerStyle={{ paddingBottom: 100 }}
       />
+      )}
     </SafeAreaView>
   );
 };

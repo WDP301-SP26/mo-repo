@@ -101,6 +101,15 @@ const ChatDetailScreen = () => {
     }
   }, [conversationId, markConversationAsRead, me?.id, messages]);
 
+  useEffect(() => {
+    if (!conversationId) return;
+    if (connectionState !== 'connected') return;
+
+    // If focus happened before socket connected, this ensures the client
+    // joins the conversation room immediately after reconnect.
+    chatSocket.sendRead(conversationId);
+  }, [connectionState, conversationId]);
+
   const handleTyping = (text: string) => {
     setInput(text);
     if (!conversationId) return;
@@ -213,6 +222,10 @@ const ChatDetailScreen = () => {
             keyExtractor={(item) => item.id}
             inverted
             contentContainerStyle={{ paddingTop: 10, paddingBottom: 12 }}
+            initialNumToRender={12}
+            maxToRenderPerBatch={12}
+            windowSize={7}
+            removeClippedSubviews={true}
             onEndReachedThreshold={0.15}
             onEndReached={loadOlder}
             ListFooterComponent={

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Modal, View, Text, TouchableOpacity, ScrollView } from 'react-native';
 import { Feather } from '@/components/icons';
 
@@ -44,12 +44,40 @@ const DatePickerModal = ({
   title = 'Select Date',
 }: DatePickerModalProps) => {
   const today = new Date();
-  const initial = value ?? today;
+  const todayStartTs = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+  const minDateTs = minDate
+    ? new Date(minDate.getFullYear(), minDate.getMonth(), minDate.getDate()).getTime()
+    : null;
+  const valueTs = value ? new Date(value.getFullYear(), value.getMonth(), value.getDate()).getTime() : null;
+
+  const initial = (() => {
+    const base = valueTs ?? todayStartTs;
+    if (minDateTs !== null && base < minDateTs) {
+      return new Date(minDateTs);
+    }
+    return new Date(base);
+  })();
 
   const [viewYear, setViewYear] = useState(initial.getFullYear());
   const [viewMonth, setViewMonth] = useState(initial.getMonth());
   const [selected, setSelected] = useState<Date>(initial);
   const [showYearPicker, setShowYearPicker] = useState(false);
+
+  useEffect(() => {
+    if (!visible) return;
+
+    const baseTs = valueTs ?? todayStartTs;
+    const nextTs = minDateTs !== null && baseTs < minDateTs ? minDateTs : baseTs;
+    const nextSelected = new Date(nextTs);
+
+    setSelected((prev) => {
+      if (prev.getTime() === nextSelected.getTime()) return prev;
+      return nextSelected;
+    });
+    setViewYear((prev) => (prev === nextSelected.getFullYear() ? prev : nextSelected.getFullYear()));
+    setViewMonth((prev) => (prev === nextSelected.getMonth() ? prev : nextSelected.getMonth()));
+    setShowYearPicker(false);
+  }, [minDateTs, todayStartTs, valueTs, visible]);
 
   const daysInMonth = getDaysInMonth(viewYear, viewMonth);
   const firstDay = getFirstDayOfMonth(viewYear, viewMonth);
@@ -69,15 +97,14 @@ const DatePickerModal = ({
 
   const handleDayPress = (day: number) => {
     const date = new Date(viewYear, viewMonth, day);
-    if (minDate && date < new Date(minDate.getFullYear(), minDate.getMonth(), minDate.getDate()))
-      return;
+    if (minDateTs !== null && date.getTime() < minDateTs) return;
     setSelected(date);
   };
 
   const isDisabled = (day: number) => {
-    if (!minDate) return false;
+    if (minDateTs === null) return false;
     const d = new Date(viewYear, viewMonth, day);
-    return d < new Date(minDate.getFullYear(), minDate.getMonth(), minDate.getDate());
+    return d.getTime() < minDateTs;
   };
 
   const yearRange = Array.from({ length: 10 }, (_, i) => today.getFullYear() - 1 + i);
@@ -240,7 +267,12 @@ const DatePickerModal = ({
               <Text className="text-sm font-semibold text-gray-300">Cancel</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              onPress={() => onConfirm(selected)}
+              onPress={() => {
+                if (minDateTs !== null && selected.getTime() < minDateTs) {
+                  return;
+                }
+                onConfirm(selected);
+              }}
               activeOpacity={0.8}
               className="flex-1 items-center rounded-xl bg-[#7C3AED] py-3">
               <Text className="text-sm font-bold text-white">Confirm</Text>

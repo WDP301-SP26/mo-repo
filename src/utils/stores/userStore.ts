@@ -3,7 +3,6 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { AuthResponse, UserProfile } from '../../services/authService';
 import { clearAccessToken, saveAccessToken } from '@/utils/auth/session';
-import { debugLog } from '@/utils/debug/log';
 
 // ==================== Types ====================
 
@@ -44,9 +43,6 @@ export const useUserStore = create<UserState>()(
       },
 
       logout: async () => {
-        debugLog('[AUTH DEBUG] logout() called', {
-          at: new Date().toISOString(),
-        });
         await clearAccessToken();
         set({ userInfo: null, isAuthenticated: false });
       },

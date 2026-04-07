@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { View, ActivityIndicator } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
@@ -10,16 +10,17 @@ import MainTabNavigator from './MainTabNavigator';
 import GroupDetailScreen from '../screens/main/GroupDetailScreen';
 import ClassDetailScreen from '../screens/main/ClassDetailScreen';
 import CreateGroupScreen from '../screens/main/CreateGroupScreen';
-import AddMemberScreen from '../screens/main/AddMemberScreen';
 import EvaluationScreen from '../screens/main/EvaluationScreen';
 import DocumentSubmissionsScreen from '../screens/main/DocumentSubmissionsScreen';
 import ReportsScreen from '../screens/main/ReportsScreen';
 import TopicLabScreen from '../screens/main/TopicLabScreen';
 import SemesterStatusScreen from '../screens/main/SemesterStatusScreen';
 import ChatDetailScreen from '../screens/main/ChatDetailScreen';
+import CheckpointManageScreen from '../screens/main/CheckpointManageScreen';
+import WeeklyGradeScreen from '../screens/main/WeeklyGradeScreen';
+import SRSEditorScreen from '../screens/main/SRSEditorScreen';
 import { getProfile } from '../services/authService';
 import { getAccessToken } from '@/utils/auth/session';
-import { debugLog } from '@/utils/debug/log';
 import { useUserStore } from '../utils/stores/userStore';
 
 // ==================== Route Types ====================
@@ -41,6 +42,18 @@ export type RootStackParamList = {
   TopicLab: { groupId: string };
   SemesterStatus: { groupId: string };
   ChatDetail: { conversationId: string; title?: string };
+  // Task 3 — Checkpoint management (Lecturer)
+  CheckpointManage: { semesterId: string; classId: string };
+  // Task 2 — Weekly grading
+  WeeklyGrade: {
+    groupId: string;
+    groupName: string;
+    semesterId: string;
+    currentWeek: number;
+    isLecturer: boolean;
+  };
+  // Task 4 — SRS versioning
+  SRSEditor: { groupId: string };
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -52,6 +65,7 @@ const DARK_CONTENT_STYLE = { backgroundColor: '#101922' };
 
 export default function AppNavigator() {
   const [checking, setChecking] = useState(true);
+  const sessionCheckRanRef = useRef(false);
 
   const login = useUserStore((s) => s.login);
   const logout = useUserStore((s) => s.logout);
@@ -64,13 +78,16 @@ export default function AppNavigator() {
    * 3. If valid → go to MainTabs, if expired → go to SignIn
    */
   useEffect(() => {
+    if (sessionCheckRanRef.current) return;
+    sessionCheckRanRef.current = true;
+
     const checkSession = async () => {
       try {
         const token = await getAccessToken();
 
         if (!token) {
           // No saved token → show login
-          if (isAuthenticated) {
+          if (useUserStore.getState().isAuthenticated) {
             await logout();
           }
           setChecking(false);
@@ -82,14 +99,9 @@ export default function AppNavigator() {
 
         // Token is valid → update store and go to main app
         await login({ access_token: token, user: profile });
-      } catch (error: any) {
-        debugLog('[AUTH DEBUG] checkSession failed', {
-          status: error?.response?.status,
-          data: error?.response?.data,
-          message: error?.message,
-        });
+      } catch {
         // Token expired or invalid → clear and show login
-        if (isAuthenticated) {
+        if (useUserStore.getState().isAuthenticated) {
           await logout();
         }
       } finally {
@@ -98,7 +110,7 @@ export default function AppNavigator() {
     };
 
     checkSession();
-  }, [isAuthenticated, login, logout]);
+  }, [login, logout]);
 
   // Show loading spinner while checking session
   if (checking) {
@@ -148,13 +160,15 @@ export default function AppNavigator() {
           <Stack.Screen name="GroupDetail" component={GroupDetailScreen} />
           <Stack.Screen name="CreateGroup" component={CreateGroupScreen} />
           <Stack.Screen name="EditGroup" component={CreateGroupScreen} />
-          <Stack.Screen name="AddMember" component={AddMemberScreen} />
           <Stack.Screen name="Evaluation" component={EvaluationScreen} />
           <Stack.Screen name="Documents" component={DocumentSubmissionsScreen} />
           <Stack.Screen name="Reports" component={ReportsScreen} />
           <Stack.Screen name="TopicLab" component={TopicLabScreen} />
           <Stack.Screen name="SemesterStatus" component={SemesterStatusScreen} />
           <Stack.Screen name="ChatDetail" component={ChatDetailScreen} />
+          <Stack.Screen name="CheckpointManage" component={CheckpointManageScreen} />
+          <Stack.Screen name="WeeklyGrade" component={WeeklyGradeScreen} />
+          <Stack.Screen name="SRSEditor" component={SRSEditorScreen} />
         </>
       )}
     </Stack.Navigator>

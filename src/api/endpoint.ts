@@ -118,6 +118,31 @@ const ENDPOINTS = {
     TEST_JIRA: '/integration/jira/test',
     TEST_GITHUB: '/integration/github/test',
   },
+
+  CHECKPOINTS: {
+    LIST: '/api/checkpoints',
+    CREATE: '/api/checkpoints',
+    UPDATE: (id: string) => `/api/checkpoints/${id}`,
+    DELETE: (id: string) => `/api/checkpoints/${id}`,
+  },
+
+  WEEKLY_GRADES: {
+    LIST: (groupId: string) => `/api/governance/grades/weekly/${groupId}`,
+    CREATE: '/api/governance/grades/weekly',
+    UPDATE: (id: string) => `/api/governance/grades/weekly/${id}`,
+    APPROVE_PRESENTATION: (groupId: string) =>
+      `/api/governance/groups/${groupId}/approve-presentation`,
+  },
+
+  SRS: {
+    BY_GROUP: (groupId: string) => `/api/srs/groups/${groupId}`,
+    CREATE: (groupId: string) => `/api/srs/groups/${groupId}`,
+    VERSIONS: (documentId: string) => `/api/srs/${documentId}/versions`,
+    VERSION_DETAIL: (documentId: string, versionId: string) =>
+      `/api/srs/${documentId}/versions/${versionId}`,
+    SUBMIT: (documentId: string) => `/api/srs/${documentId}/submit`,
+    GRADE: (documentId: string) => `/api/srs/${documentId}/grade`,
+  },
 } as const;
 
 export default ENDPOINTS;

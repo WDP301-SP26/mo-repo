@@ -1,5 +1,5 @@
 import React from 'react';
-import { enableScreens } from 'react-native-screens';
+import { enableFreeze, enableScreens } from 'react-native-screens';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
@@ -10,6 +10,7 @@ import AppNavigator from './src/navigation/AppNavigator';
 
 // Enable native screen views for better memory and smoother transitions
 enableScreens(true);
+enableFreeze(true);
 
 /**
  * Dark navigation theme — prevents white background flashes during transitions.

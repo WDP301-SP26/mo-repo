@@ -16,11 +16,9 @@ import { RootStackParamList } from '../../navigation/AppNavigator';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@/components/icons';
 import { getAccessToken } from '@/utils/auth/session';
-import { debugLog } from '@/utils/debug/log';
 import { useUserStore } from '../../utils/stores/userStore';
 import { login } from '../../services/authService';
 import { showError, showSuccess } from '../../utils/toast';
-import { Eye, EyeOff } from 'lucide-react-native';
 import { getZodErrorMessage, signInSchema } from '@/utils/validation/formSchemas';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'SignIn'>;
@@ -57,18 +55,8 @@ const SignInScreen = ({ navigation }: Props) => {
 
       const savedToken = await getAccessToken();
       if (!savedToken) {
-        debugLog('[AUTH DEBUG] SignIn: token missing after saveUserToStore', {
-          userId: data?.user?.id,
-          email: data?.user?.email,
-        });
         throw new Error('Token was not persisted after login');
       }
-
-      debugLog('[AUTH DEBUG] SignIn success', {
-        userId: data?.user?.id,
-        email: data?.user?.email,
-        hasSavedToken: !!savedToken,
-      });
 
       showSuccess(`Welcome back, ${data.user.fullName}`, 'Login Successful');
       navigation.reset({
@@ -151,9 +139,9 @@ const SignInScreen = ({ navigation }: Props) => {
                 />
                 <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
                   {showPassword ? (
-                    <Eye size={20} color="#64748B" />
+                    <Feather name="eye" size={20} color="#64748B" />
                   ) : (
-                    <EyeOff size={20} color="#64748B" />
+                    <Feather name="eye-off" size={20} color="#64748B" />
                   )}
                 </TouchableOpacity>
               </View>

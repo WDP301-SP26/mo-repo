@@ -144,7 +144,11 @@ const MainTabNavigator = () => {
 
   return (
     <Tab.Navigator
-      screenOptions={{ headerShown: false }}
+      screenOptions={{
+        headerShown: false,
+        lazy: true,
+        freezeOnBlur: true,
+      }}
       tabBar={(props) => <CustomTabBar {...props} />}
       detachInactiveScreens={true}>
       <Tab.Screen name="Dashboard" component={DashboardScreen} />

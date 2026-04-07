@@ -47,7 +47,6 @@ import type { ContributorStat, GroupRepo } from '@/types/github';
 import type { JiraTaskStatus } from '@/types/activity';
 import { JIRA_STATUS_CONFIG } from '@/types/activity';
 import type { RootStackParamList } from '@/navigation/AppNavigator';
-import { debugLog } from '@/utils/debug/log';
 import { useUserStore } from '@/utils/stores/userStore';
 import { getZodErrorMessage, taskFormSchema } from '@/utils/validation/formSchemas';
 
@@ -173,6 +172,7 @@ const GroupDetailScreen = () => {
   const [dueDatePickerVisible, setDueDatePickerVisible] = useState(false);
   const [formAssigneeId, setFormAssigneeId] = useState<string | null>(null);
   const [taskFormError, setTaskFormError] = useState('');
+  const fetchRequestIdRef = useRef(0);
 
   // ── Derived State ───────────────────────────────
 
@@ -253,22 +253,32 @@ const GroupDetailScreen = () => {
   // ── Fetch Data ──────────────────────────────────
 
   const fetchGroup = useCallback(async () => {
+    const requestId = ++fetchRequestIdRef.current;
+
     try {
       setLoading(true);
       const data = await getGroupById(groupId);
+
+      if (requestId !== fetchRequestIdRef.current) return;
+
       setGroup(data);
+      setLoading(false);
+
+      // Primary UI is ready now. Load secondary data in background.
+      void fetchTasks(true, data.jira_project_key);
 
       // Fetch Jira site URL for deep-link badge (fire-and-forget)
       // Uses project.self which contains the actual Jira site URL
       // e.g. https://yoursite.atlassian.net/rest/api/3/project/10000
       if (data.jira_project_key) {
-        getJiraProjects()
+        void getJiraProjects()
           .then((projects) => {
+            if (requestId !== fetchRequestIdRef.current) return;
+
             const normalizedProjectKey = data.jira_project_key?.trim().toUpperCase();
             const match = projects.find(
               (p) => p.key?.trim().toUpperCase() === normalizedProjectKey
             );
-            debugLog('[Jira] project self', { self: match?.self });
 
             const siteOrigin =
               getValidJiraSiteOrigin(match?.siteUrl) || getValidJiraSiteOrigin(match?.self);
@@ -294,9 +304,11 @@ const GroupDetailScreen = () => {
           setMemberJiraAccess(null);
           checkJiraProjectAssignable(data.jira_project_key)
             .then((assignable) => {
+              if (requestId !== fetchRequestIdRef.current) return;
               setMemberJiraAccess(assignable);
             })
             .catch(() => {
+              if (requestId !== fetchRequestIdRef.current) return;
               setMemberJiraAccess(null);
             });
         } else {
@@ -304,31 +316,37 @@ const GroupDetailScreen = () => {
         }
       }
 
-      await fetchTasks(true, data.jira_project_key);
-
       // Fetch linked repos + stats
-      try {
-        const repos = await getGroupRepos(groupId);
-        setLinkedRepos(repos);
+      void (async () => {
+        try {
+          const repos = await getGroupRepos(groupId);
+          if (requestId !== fetchRequestIdRef.current) return;
 
-        // Determine which repo to fetch stats for
-        let owner = '';
-        let repoName = '';
+          setLinkedRepos(repos);
 
-        const primaryRepo = repos.find((r) => r.is_primary) || repos[0];
-        if (primaryRepo) {
-          owner = primaryRepo.repo_owner;
-          repoName = primaryRepo.repo_name;
-        } else if (data.github_repo_url) {
-          // Fallback: parse owner/repo from github_repo_url field
-          const match = data.github_repo_url.match(/github\.com\/([^/]+)\/([^/]+)/);
-          if (match) {
-            owner = match[1];
-            repoName = match[2].replace(/\.git$/, '');
+          // Determine which repo to fetch stats for
+          let owner = '';
+          let repoName = '';
+
+          const primaryRepo = repos.find((r) => r.is_primary) || repos[0];
+          if (primaryRepo) {
+            owner = primaryRepo.repo_owner;
+            repoName = primaryRepo.repo_name;
+          } else if (data.github_repo_url) {
+            // Fallback: parse owner/repo from github_repo_url field
+            const match = data.github_repo_url.match(/github\.com\/([^/]+)\/([^/]+)/);
+            if (match) {
+              owner = match[1];
+              repoName = match[2].replace(/\.git$/, '');
+            }
           }
-        }
 
-        if (owner && repoName) {
+          if (!owner || !repoName) {
+            setContributorStats([]);
+            setLoadingStats(false);
+            return;
+          }
+
           setLoadingStats(true);
 
           // Fetch both: commits for accurate count, stats for LOC
@@ -336,6 +354,8 @@ const GroupDetailScreen = () => {
             getCommits(owner, repoName).catch(() => []),
             getContributorStats(owner, repoName).catch(() => []),
           ]);
+
+          if (requestId !== fetchRequestIdRef.current) return;
 
           // Count commits per author from commits API
           const commitCountMap: Record<string, number> = {};
@@ -365,16 +385,20 @@ const GroupDetailScreen = () => {
           }
 
           setContributorStats(mergedStats);
-          setLoadingStats(false);
+        } catch {
+          // Non-blocking — repos/stats may not be available
+        } finally {
+          if (requestId === fetchRequestIdRef.current) {
+            setLoadingStats(false);
+          }
         }
-      } catch {
-        // Non-blocking — repos/stats may not be available
-      }
+      })();
     } catch (error: any) {
-      showError(error.response?.data?.message || 'Failed to load group');
+      if (requestId === fetchRequestIdRef.current) {
+        setLoading(false);
+      }
+      showError(getApiErrorMessage(error, 'Failed to load group'));
       navigation.goBack();
-    } finally {
-      setLoading(false);
     }
   }, [currentUser?.email, currentUser?.id, fetchTasks, groupId, navigation]);
 
@@ -440,6 +464,11 @@ const GroupDetailScreen = () => {
   };
 
   const openEditTaskModal = (task: TaskItem) => {
+    if (task.status === 'DONE') {
+      showInfo('Completed tasks cannot be edited.');
+      return;
+    }
+
     setEditingTask(task);
     setFormTitle(task.title || '');
     setFormDescription(task.description || '');
@@ -457,6 +486,11 @@ const GroupDetailScreen = () => {
   };
 
   const handleSaveTask = async () => {
+    if (editingTask?.status === 'DONE') {
+      setTaskFormError('Completed tasks cannot be edited.');
+      return;
+    }
+
     const parsed = taskFormSchema.safeParse({
       title: formTitle,
       description: formDescription,
@@ -466,6 +500,15 @@ const GroupDetailScreen = () => {
 
     if (!parsed.success) {
       setTaskFormError(getZodErrorMessage(parsed.error));
+      return;
+    }
+
+    const today = new Date();
+    const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const dueDate = new Date(parsed.data.dueDate);
+    const dueDateStart = new Date(dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate());
+    if (dueDateStart < todayStart) {
+      setTaskFormError('Due date cannot be in the past.');
       return;
     }
 
@@ -1155,12 +1198,14 @@ const GroupDetailScreen = () => {
                             />
                           </TouchableOpacity>
                         )}
-                        <TouchableOpacity
-                          onPress={() => openEditTaskModal(task)}
-                          className="h-8 w-8 items-center justify-center rounded-lg bg-[#243447]"
-                          activeOpacity={0.8}>
-                          <Feather name="edit-2" size={14} color="#93C5FD" />
-                        </TouchableOpacity>
+                        {task.status !== 'DONE' && (
+                          <TouchableOpacity
+                            onPress={() => openEditTaskModal(task)}
+                            className="h-8 w-8 items-center justify-center rounded-lg bg-[#243447]"
+                            activeOpacity={0.8}>
+                            <Feather name="edit-2" size={14} color="#93C5FD" />
+                          </TouchableOpacity>
+                        )}
                         <TouchableOpacity
                           onPress={() => handleDeleteTask(task)}
                           className="h-8 w-8 items-center justify-center rounded-lg bg-[#243447]"
@@ -1227,15 +1272,6 @@ const GroupDetailScreen = () => {
         <View className="mx-4 mt-4">
           <View className="mb-3 flex-row items-center justify-between">
             <Text className="text-base font-bold text-white">Members ({group.members.length})</Text>
-            {isLeader && (
-              <TouchableOpacity
-                onPress={() => navigation.navigate('AddMember', { groupId: group.id })}
-                activeOpacity={0.8}
-                className="flex-row items-center gap-1 rounded-lg bg-[#7C3AED]/15 px-3 py-1.5">
-                <Feather name="user-plus" size={14} color="#7C3AED" />
-                <Text className="text-xs font-semibold text-[#7C3AED]">Add</Text>
-              </TouchableOpacity>
-            )}
           </View>
 
           <View className="rounded-2xl bg-[#1A2332] px-4">
@@ -1502,6 +1538,7 @@ const GroupDetailScreen = () => {
       <DatePickerModal
         visible={dueDatePickerVisible}
         value={formDueDate ? new Date(formDueDate) : null}
+        minDate={new Date()}
         title="Select Due Date"
         onConfirm={(date) => {
           setFormDueDate(date.toISOString().slice(0, 10));
@@ -1582,7 +1619,7 @@ const GroupDetailScreen = () => {
 
             {/* Role Options */}
             <Text className="mb-2 ml-1 text-xs font-semibold text-gray-600">CHANGE ROLE</Text>
-            {(['MEMBER', 'LEADER', 'MENTOR'] as MembershipRole[])
+            {(['MEMBER', 'LEADER'] as MembershipRole[])
               .filter((r) => r !== resolveMemberRole(selectedMemberRef.current))
               .map((role) => (
                 <TouchableOpacity

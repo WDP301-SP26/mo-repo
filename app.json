@@ -2,6 +2,7 @@
   "expo": {
     "name": "jihub-app",
     "slug": "jihub-app",
+    "newArchEnabled": true,
     "scheme": "jihub",
     "version": "1.0.0",
     "web": {

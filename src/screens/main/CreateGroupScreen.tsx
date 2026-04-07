@@ -22,8 +22,7 @@ import { createGroup, updateGroup, getGroupById, linkRepoToGroup } from '@/servi
 import { getRepositories, createRepository, type GitHubRepo } from '@/services/githubService';
 import { getJiraProjects, linkJiraProject, type JiraProject } from '@/services/jiraService';
 import { getCurrentSemester, type SerializedSemester } from '@/services/semesterService';
-import { debugLog } from '@/utils/debug/log';
-import { showSuccess, showError } from '@/utils/toast';
+import { showSuccess, showError, showInfo } from '@/utils/toast';
 import type { RootStackParamList } from '@/navigation/AppNavigator';
 import {
   createRepoSchema,
@@ -430,10 +429,8 @@ const CreateGroupScreen = () => {
               repo_name: repoName || selectedRepo.name,
               repo_owner: owner || '',
             });
-          } catch (linkError: any) {
-            debugLog('Failed to link repo to group (edit)', {
-              message: linkError?.message,
-            });
+          } catch {
+            showInfo('Group updated, but failed to link selected repository.');
           }
         }
 
@@ -470,10 +467,8 @@ const CreateGroupScreen = () => {
               repo_name: repoName || selectedRepo.name,
               repo_owner: owner || '',
             });
-          } catch (linkError: any) {
-            debugLog('Failed to link repo to group', {
-              message: linkError?.message,
-            });
+          } catch {
+            showInfo('Group created, but failed to link selected repository.');
           }
         }
 

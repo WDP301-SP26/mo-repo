@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Animated,
@@ -24,11 +24,11 @@ import { useUserStore } from '@/utils/stores/userStore';
 import type { RootStackParamList } from '@/navigation/AppNavigator';
 import { getProfile } from '@/services/authService';
 import { getAccessToken } from '@/utils/auth/session';
-import { debugLog } from '@/utils/debug/log';
 import { getMyGroups } from '@/services/studentService';
 import { getNotifications } from '@/services/notificationService';
 import { getJiraProjects } from '@/services/jiraService';
 import { getTasks, type TaskItem } from '@/services/taskService';
+import { getCurrentSemester, type SerializedSemester } from '@/services/semesterService';
 import type { Group } from '@/types/group';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -223,6 +223,7 @@ const DashboardScreen = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [hasBootstrapped, setHasBootstrapped] = useState(false);
   const [jiraSiteByKey, setJiraSiteByKey] = useState<Record<string, string>>({});
+  const [currentSemester, setCurrentSemester] = useState<SerializedSemester | null>(null);
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(20)).current;
@@ -242,14 +243,6 @@ const DashboardScreen = () => {
   const activeGroup = groups[activeIndex] ?? null;
 
   useEffect(() => {
-    if (!displayName) {
-      debugLog('[AUTH DEBUG] Dashboard displayName missing', {
-        userInfo,
-      });
-    }
-  }, [displayName, userInfo]);
-
-  useEffect(() => {
     let active = true;
 
     const hydrateMissingUser = async () => {
@@ -257,12 +250,10 @@ const DashboardScreen = () => {
 
       const token = await getAccessToken();
       if (!token) {
-        debugLog('[AUTH DEBUG] No token in storage while Dashboard mounted');
         return;
       }
 
       try {
-        debugLog('[AUTH DEBUG] userInfo missing, hydrating profile from /auth/me');
         const profile = await getProfile();
 
         if (!active) return;
@@ -271,18 +262,7 @@ const DashboardScreen = () => {
           access_token: token,
           user: profile,
         });
-
-        debugLog('[AUTH DEBUG] Dashboard hydration success', {
-          userId: profile.id,
-          fullName: profile.fullName,
-        });
-      } catch (error: any) {
-        debugLog('[AUTH DEBUG] Dashboard hydration failed', {
-          status: error?.response?.status,
-          data: error?.response?.data,
-          message: error?.message,
-        });
-
+      } catch {
         await logout();
 
         if (active) {
@@ -302,25 +282,38 @@ const DashboardScreen = () => {
   }, [userInfo, loginToStore, logout, navigation]);
 
   // ── Task stats derived from groupTasks ──
-  const todoCount = groupTasks.filter((t) => t.status === 'TO_DO').length;
-  const inProgressCount = groupTasks.filter((t) => t.status === 'IN_PROGRESS').length;
-  const doneCount = groupTasks.filter((t) => t.status === 'DONE').length;
-  const totalCount = groupTasks.length;
-  const progressPct = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
+  const { todoCount, inProgressCount, doneCount, totalCount, progressPct } = useMemo(() => {
+    const todo = groupTasks.filter((t) => t.status === 'TO_DO').length;
+    const inProgress = groupTasks.filter((t) => t.status === 'IN_PROGRESS').length;
+    const done = groupTasks.filter((t) => t.status === 'DONE').length;
+    const total = groupTasks.length;
+
+    return {
+      todoCount: todo,
+      inProgressCount: inProgress,
+      doneCount: done,
+      totalCount: total,
+      progressPct: total > 0 ? Math.round((done / total) * 100) : 0,
+    };
+  }, [groupTasks]);
 
   // ── My tasks: assigned to current user, not done, sorted by due_at ──
-  const myTasks = groupTasks
-    .filter((t) => {
-      if (t.status === 'DONE') return false;
-      return t.assignee_id === userInfo?.id;
-    })
-    .sort((a, b) => {
-      if (!a.due_at && !b.due_at) return 0;
-      if (!a.due_at) return 1;
-      if (!b.due_at) return -1;
-      return new Date(a.due_at).getTime() - new Date(b.due_at).getTime();
-    })
-    .slice(0, 4);
+  const myTasks = useMemo(
+    () =>
+      groupTasks
+        .filter((t) => {
+          if (t.status === 'DONE') return false;
+          return t.assignee_id === userInfo?.id;
+        })
+        .sort((a, b) => {
+          if (!a.due_at && !b.due_at) return 0;
+          if (!a.due_at) return 1;
+          if (!b.due_at) return -1;
+          return new Date(a.due_at).getTime() - new Date(b.due_at).getTime();
+        })
+        .slice(0, 4),
+    [groupTasks, userInfo?.id]
+  );
 
   const loadTasksForGroup = useCallback(async (groupId: string) => {
     setTasksLoading(true);
@@ -340,10 +333,12 @@ const DashboardScreen = () => {
       try {
         if (shouldBlock) setLoading(true);
 
-        const [allGroups, notifications] = await Promise.all([
+        const [allGroups, notifications, semester] = await Promise.all([
           getMyGroups(),
           getNotifications().catch(() => []),
+          getCurrentSemester().catch(() => null),
         ]);
+        setCurrentSemester(semester);
 
         setGroups(allGroups);
         setUnreadCount(notifications.filter((n) => !n.is_read).length);
@@ -508,6 +503,27 @@ const DashboardScreen = () => {
           )}
         </TouchableOpacity>
       </Animated.View>
+
+      {/* ── Semester UPCOMING banner (Task 1) ───────────────────── */}
+      {currentSemester?.status === 'UPCOMING' && (
+        <View className="mx-4 mb-1 mt-2 flex-row items-start gap-3 rounded-2xl bg-amber-900/30 px-4 py-3">
+          <Feather name="clock" size={16} color="#FCD34D" style={{ marginTop: 1 }} />
+          <View className="flex-1">
+            <Text className="text-sm font-semibold text-amber-300">
+              Học kỳ {currentSemester.name} chưa bắt đầu
+            </Text>
+            <Text className="mt-0.5 text-xs text-amber-400/80">
+              Sẽ bắt đầu vào{' '}
+              {new Date(currentSemester.start_date).toLocaleDateString('vi-VN', {
+                day: '2-digit',
+                month: '2-digit',
+                year: 'numeric',
+              })}
+              . Hiện tại đang ở chế độ xem trước — một số thao tác bị tạm khóa.
+            </Text>
+          </View>
+        </View>
+      )}
 
       <ScrollView
         className="flex-1"

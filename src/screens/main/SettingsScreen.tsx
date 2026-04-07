@@ -4,9 +4,7 @@ import {
   Text,
   ScrollView,
   TouchableOpacity,
-  Image,
   StatusBar,
-  Switch,
   Modal,
   Pressable,
 } from 'react-native';
@@ -64,9 +62,10 @@ const SettingItem = React.memo(
 
 const SettingsScreen = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const { userInfo, logout } = useUserStore();
+
+  const initial = userInfo?.fullName?.trim()?.charAt(0)?.toUpperCase() || 'U';
 
   /** Handle logout with custom dark modal instead of native Alert */
   const confirmLogout = async () => {
@@ -97,22 +96,21 @@ const SettingsScreen = () => {
         contentContainerStyle={{ paddingBottom: 100 }}
         showsVerticalScrollIndicator={false}>
         {/* ── Header ── */}
-        <View className="px-4 py-3">
+        <View className="px-4 pb-2 pt-3">
           <Text className="text-2xl font-bold text-white">Settings</Text>
+          <Text className="mt-1 text-sm text-gray-400">Manage your account and app preferences</Text>
         </View>
 
-        {/* ── Profile Card ── */}
+        {/* ── Account Snapshot ── */}
         <View className="mb-6 px-4">
-          <View className="rounded-2xl bg-[#1A2332] p-4">
+          <View className="overflow-hidden rounded-2xl border border-[#27364A] bg-[#1A2332] p-4">
+            <View
+              className="absolute -right-8 -top-8 h-28 w-28 rounded-full"
+              style={{ backgroundColor: 'rgba(124,58,237,0.18)' }}
+            />
             <View className="flex-row items-center">
-              <View className="relative">
-                <Image
-                  source={{ uri: 'https://i.pravatar.cc/150?img=1' }}
-                  className="h-[72px] w-[72px] rounded-full border-[3px] border-[#7C3AED]"
-                />
-                <TouchableOpacity className="absolute bottom-0 right-0 h-[26px] w-[26px] items-center justify-center rounded-full border-2 border-[#1A2332] bg-[#7C3AED]">
-                  <Feather name="camera" size={12} color="#fff" />
-                </TouchableOpacity>
+              <View className="h-[64px] w-[64px] items-center justify-center rounded-2xl border border-[#7C3AED]/40 bg-[#7C3AED]/20">
+                <Text className="text-2xl font-black text-[#C4B5FD]">{initial}</Text>
               </View>
               <View className="ml-4 flex-1">
                 <Text className="text-xl font-bold text-white">{userInfo?.fullName || 'User'}</Text>
@@ -125,12 +123,9 @@ const SettingsScreen = () => {
                 </View>
               </View>
             </View>
-
-            <TouchableOpacity
-              activeOpacity={0.8}
-              className="mt-4 items-center rounded-xl bg-[#7C3AED] py-3">
-              <Text className="text-sm font-semibold text-white">Edit Profile</Text>
-            </TouchableOpacity>
+            <View className="mt-4 rounded-xl border border-white/10 bg-[#101922] px-3 py-2.5">
+              <Text className="text-xs text-gray-500">Profile editing is managed by your school system.</Text>
+            </View>
           </View>
         </View>
 
@@ -146,41 +141,15 @@ const SettingsScreen = () => {
           />
         </View>
 
-        {/* ── Preferences ── */}
+        {/* ── App Info ── */}
         <View className="mt-6 px-4">
-          <Text className="mb-2 ml-1 text-xs font-semibold text-gray-600">PREFERENCES</Text>
-          <SettingItem
-            icon="bell"
-            iconColor="#EAB308"
-            title="Notifications"
-            subtitle={notificationsEnabled ? 'Enabled' : 'Disabled'}
-            showChevron={false}
-            rightElement={
-              <Switch
-                value={notificationsEnabled}
-                onValueChange={setNotificationsEnabled}
-                trackColor={{ false: '#243447', true: '#7C3AED60' }}
-                thumbColor={notificationsEnabled ? '#7C3AED' : '#475569'}
-              />
-            }
-          />
-        </View>
-
-        {/* ── Support ── */}
-        <View className="mt-6 px-4">
-          <Text className="mb-2 ml-1 text-xs font-semibold text-gray-600">SUPPORT</Text>
-          <SettingItem
-            icon="help-circle"
-            iconColor="#94A3B8"
-            title="Help Center"
-            onPress={() => {}}
-          />
+          <Text className="mb-2 ml-1 text-xs font-semibold text-gray-600">APP INFO</Text>
           <SettingItem
             icon="info"
             iconColor="#94A3B8"
             title="About JiHub"
             subtitle="Version 1.0.0"
-            onPress={() => {}}
+            showChevron={false}
           />
         </View>
 

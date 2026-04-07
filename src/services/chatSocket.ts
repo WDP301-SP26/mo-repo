@@ -1,7 +1,6 @@
 import { API_URL, CHAT_SOCKET_NAMESPACE, CHAT_WS_URL } from '@env';
 import { io, Socket } from 'socket.io-client';
 import { normalizeChatMessage } from '@/services/chatService';
-import { debugLog } from '@/utils/debug/log';
 import type { ChatMessage, MessageReadEvent, TypingEvent } from '@/types/chat';
 
 export type ChatConnectionState = 'disconnected' | 'connecting' | 'connected';
@@ -218,12 +217,6 @@ class ChatSocketManager {
         rawMessage.includes('unauthorized') ||
         rawMessage.includes('jwt') ||
         rawMessage.includes('forbidden');
-
-      debugLog('[CHAT DEBUG] connect_error', {
-        message: error?.message,
-        data: error?.data,
-        isUnauthorized,
-      });
 
       this.errorListeners.forEach((listener) =>
         listener({

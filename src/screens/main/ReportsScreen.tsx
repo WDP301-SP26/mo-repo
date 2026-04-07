@@ -6,12 +6,14 @@ import {
   TouchableOpacity,
   StatusBar,
   ActivityIndicator,
+  Share,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@/components/icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
+import * as FileSystem from 'expo-file-system';
 
 import type { RootStackParamList } from '@/navigation/AppNavigator';
 import {
@@ -52,6 +54,126 @@ const avatarColor = (name: string) => {
 };
 
 const fmtNum = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
+
+const toSafeFilePart = (raw: string) =>
+  raw
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-_]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'group';
+
+const renderInlineMarkdown = (text: string) => {
+  const segments = text.split(/(\*\*[^*]+\*\*)/g).filter(Boolean);
+  return segments.map((segment, index) => {
+    const isBold = segment.startsWith('**') && segment.endsWith('**');
+    const content = isBold ? segment.slice(2, -2) : segment;
+    return (
+      <Text key={`${content}-${index}`} className={isBold ? 'font-semibold text-white' : ''}>
+        {content}
+      </Text>
+    );
+  });
+};
+
+const SrsFormattedView = ({ markdown }: { markdown: string }) => {
+  const normalized = markdown.replace(/\r/g, '');
+  const lines = normalized.split('\n');
+
+  const blocks: React.ReactNode[] = [];
+  let inCodeBlock = false;
+  let codeLines: string[] = [];
+
+  lines.forEach((rawLine, index) => {
+    const line = rawLine;
+    const trimmed = line.trim();
+
+    if (trimmed.startsWith('```')) {
+      if (inCodeBlock) {
+        blocks.push(
+          <View key={`code-${index}`} className="mb-3 rounded-xl bg-[#101922] px-3 py-2.5">
+            <Text className="font-mono text-xs leading-5 text-gray-300">{codeLines.join('\n')}</Text>
+          </View>
+        );
+        codeLines = [];
+        inCodeBlock = false;
+      } else {
+        inCodeBlock = true;
+      }
+      return;
+    }
+
+    if (inCodeBlock) {
+      codeLines.push(line);
+      return;
+    }
+
+    if (!trimmed) {
+      blocks.push(<View key={`space-${index}`} className="h-1.5" />);
+      return;
+    }
+
+    const headingMatch = trimmed.match(/^(#{1,6})\s+(.+)$/);
+    if (headingMatch) {
+      const level = headingMatch[1].length;
+      const title = headingMatch[2];
+      const sizeClass =
+        level === 1 ? 'text-xl' : level === 2 ? 'text-lg' : level === 3 ? 'text-base' : 'text-sm';
+
+      blocks.push(
+        <Text key={`heading-${index}`} className={`mb-2 mt-1 font-bold text-white ${sizeClass}`}>
+          {title}
+        </Text>
+      );
+      return;
+    }
+
+    const numberedMatch = trimmed.match(/^(\d+)\.\s+(.+)$/);
+    if (numberedMatch) {
+      blocks.push(
+        <View key={`num-${index}`} className="mb-1.5 flex-row">
+          <Text className="mr-2 text-xs font-semibold text-[#A78BFA]">{numberedMatch[1]}.</Text>
+          <Text className="flex-1 text-xs leading-5 text-gray-300">
+            {renderInlineMarkdown(numberedMatch[2])}
+          </Text>
+        </View>
+      );
+      return;
+    }
+
+    const bulletMatch = trimmed.match(/^[-*]\s+(.+)$/);
+    if (bulletMatch) {
+      blocks.push(
+        <View key={`bullet-${index}`} className="mb-1.5 flex-row">
+          <Text className="mr-2 text-xs text-[#A78BFA]">•</Text>
+          <Text className="flex-1 text-xs leading-5 text-gray-300">
+            {renderInlineMarkdown(bulletMatch[1])}
+          </Text>
+        </View>
+      );
+      return;
+    }
+
+    blocks.push(
+      <Text key={`para-${index}`} className="mb-1.5 text-xs leading-5 text-gray-300">
+        {renderInlineMarkdown(trimmed)}
+      </Text>
+    );
+  });
+
+  if (codeLines.length > 0) {
+    blocks.push(
+      <View key="code-tail" className="mb-3 rounded-xl bg-[#101922] px-3 py-2.5">
+        <Text className="font-mono text-xs leading-5 text-gray-300">{codeLines.join('\n')}</Text>
+      </View>
+    );
+  }
+
+  if (blocks.length === 0) {
+    return <Text className="text-xs leading-5 text-gray-500">No SRS output</Text>;
+  }
+
+  return <View>{blocks}</View>;
+};
 
 // ─── Sub-components ─────────────────────────────────────────────────────────
 
@@ -273,6 +395,7 @@ const ReportsScreen = () => {
   const [mode, setMode] = useState<ReportMode>('none');
   const [srs, setSrs] = useState('');
   const [commit, setCommit] = useState<CommitReport | null>(null);
+  const [exportingSrs, setExportingSrs] = useState(false);
 
   const runSrs = useCallback(async () => {
     try {
@@ -303,6 +426,65 @@ const ReportsScreen = () => {
       setLoading(false);
     }
   }, [groupId]);
+
+  const exportSrsToFile = useCallback(async () => {
+    if (!srs.trim()) {
+      showError('No SRS content to export');
+      return;
+    }
+
+    try {
+      setExportingSrs(true);
+
+      const now = new Date();
+      const stamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(
+        now.getDate()
+      ).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(
+        now.getMinutes()
+      ).padStart(2, '0')}`;
+
+      const fileName = `srs-${toSafeFilePart(groupId)}-${stamp}.md`;
+      const baseDir = FileSystem.documentDirectory || FileSystem.cacheDirectory;
+      if (!baseDir) {
+        showError('Cannot access local storage on this device');
+        return;
+      }
+
+      const fileUri = `${baseDir}${fileName}`;
+      await FileSystem.writeAsStringAsync(fileUri, srs, {
+        encoding: FileSystem.EncodingType.UTF8,
+      });
+
+      // Lazy-load expo-sharing so app does not crash on clients that have not
+      // rebuilt native modules yet.
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const SharingModule: any = require('expo-sharing');
+        const canShare = await SharingModule.isAvailableAsync();
+        if (canShare) {
+          await SharingModule.shareAsync(fileUri, {
+            mimeType: 'text/markdown',
+            dialogTitle: 'Save or share SRS file',
+            UTI: 'net.daringfireball.markdown',
+          });
+          showSuccess('SRS file is ready. Choose Save to Files to store locally.');
+          return;
+        }
+      } catch {
+        // Fall back to native text sharing below.
+      }
+
+      await Share.share({
+        title: fileName,
+        message: srs,
+      });
+      showSuccess('SRS content shared');
+    } catch (error: any) {
+      showError(error?.message || 'Failed to export SRS');
+    } finally {
+      setExportingSrs(false);
+    }
+  }, [groupId, srs]);
 
   return (
     <SafeAreaView className="flex-1 bg-[#101922]" edges={['top']}>
@@ -380,11 +562,27 @@ const ReportsScreen = () => {
         {/* SRS */}
         {!loading && mode === 'srs' ? (
           <View className="rounded-2xl bg-[#1A2332] p-4">
-            <View className="mb-3 flex-row items-center gap-2">
-              <Feather name="file-text" size={15} color="#A78BFA" />
-              <Text className="font-semibold text-white">SRS Markdown</Text>
+            <View className="mb-3 flex-row items-center justify-between gap-2">
+              <View className="flex-row items-center gap-2">
+                <Feather name="file-text" size={15} color="#A78BFA" />
+                <Text className="font-semibold text-white">SRS Markdown</Text>
+              </View>
+              <TouchableOpacity
+                onPress={exportSrsToFile}
+                disabled={exportingSrs || !srs.trim()}
+                activeOpacity={0.8}
+                className={`flex-row items-center gap-1.5 rounded-lg px-3 py-2 ${
+                  exportingSrs || !srs.trim() ? 'bg-[#334155]' : 'bg-[#7C3AED]'
+                }`}>
+                {exportingSrs ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Feather name="download" size={13} color="#fff" />
+                )}
+                <Text className="text-xs font-semibold text-white">Export .md</Text>
+              </TouchableOpacity>
             </View>
-            <Text className="text-xs leading-5 text-gray-300">{srs}</Text>
+            <SrsFormattedView markdown={srs} />
           </View>
         ) : null}
 

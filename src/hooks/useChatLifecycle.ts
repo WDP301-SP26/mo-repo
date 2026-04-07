@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { AppState } from 'react-native';
 import { chatSocket } from '@/services/chatSocket';
 import { getAccessToken } from '@/utils/auth/session';
@@ -10,6 +10,7 @@ import { showWarning } from '@/utils/toast';
 export const useChatLifecycle = () => {
   const isAuthenticated = useUserStore((s) => s.isAuthenticated);
   const logout = useUserStore((s) => s.logout);
+  const connectingRef = useRef(false);
 
   useEffect(() => {
     const unsubscribers = [
@@ -53,6 +54,10 @@ export const useChatLifecycle = () => {
 
     const connect = async () => {
       if (disposed || AppState.currentState !== 'active') return;
+      if (connectingRef.current) return;
+      if (chatSocket.state === 'connected' || chatSocket.state === 'connecting') return;
+
+      connectingRef.current = true;
 
       try {
         const token = await getAccessToken();
@@ -71,6 +76,8 @@ export const useChatLifecycle = () => {
         if (!disposed) {
           showWarning(mapChatErrorToMessage(error), 'Chat Connection');
         }
+      } finally {
+        connectingRef.current = false;
       }
     };
 
@@ -93,6 +100,7 @@ export const useChatLifecycle = () => {
 
     return () => {
       disposed = true;
+      connectingRef.current = false;
       appStateSub.remove();
       clearInterval(typingGc);
       chatSocket.disconnect();

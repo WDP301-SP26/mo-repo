@@ -9,7 +9,7 @@ import * as WebBrowser from 'expo-web-browser';
 import * as AuthSession from 'expo-auth-session';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { OAUTH_REDIRECT_URI } from '@env';
-import { showSuccess, showError } from '../../utils/toast';
+import { showSuccess, showError, showInfo } from '../../utils/toast';
 import { useUserStore } from '../../utils/stores/userStore';
 import {
   getGitHubAuthUrl,
@@ -122,7 +122,7 @@ const LinkThirdPartyScreen = ({ navigation }: Props) => {
         showSuccess('Success', `${provider} account linked successfully!`);
       }
     } catch (error) {
-      console.error(`[${provider.toUpperCase()}] Failed to refresh linked status:`, error);
+      showError('Error', `Failed to refresh ${provider} link status`);
     }
   };
 
@@ -135,14 +135,11 @@ const LinkThirdPartyScreen = ({ navigation }: Props) => {
     if (isLoading) return;
 
     const redirectUri = getOAuthRedirectUri();
-    console.log(`[${provider.toUpperCase()}] Redirect URI:`, redirectUri);
 
     try {
       setIsLoading(true);
       const token = await AsyncStorage.getItem('access_token');
       const authUrl = getAuthUrl(token || undefined, redirectUri);
-
-      console.log(`[${provider.toUpperCase()}] Opening auth session:`, authUrl);
 
       if (provider === 'jira') {
         // Jira flow can end on a non-app callback URL; avoid waiting for deep-link callback.
@@ -156,14 +153,13 @@ const LinkThirdPartyScreen = ({ navigation }: Props) => {
       if (result.type === 'success' && result.url) {
         await handleOAuthSuccess(result.url, provider, setLinked);
       } else if (result.type === 'cancel') {
-        console.log(`[${provider.toUpperCase()}] Auth cancelled by user`);
+        showInfo('Info', `${provider} connection was cancelled`);
         await syncLinkedStatus(provider, setLinked);
       } else if (result.type === 'dismiss') {
-        console.log(`[${provider.toUpperCase()}] Auth dismissed`);
+        showInfo('Info', `${provider} connection was dismissed`);
         await syncLinkedStatus(provider, setLinked);
       }
     } catch (error) {
-      console.error(`[${provider.toUpperCase()}] OAuth error:`, error);
       showError('Error', `Failed to connect ${provider} account`);
     } finally {
       setIsLoading(false);
@@ -176,14 +172,11 @@ const LinkThirdPartyScreen = ({ navigation }: Props) => {
     setLinked: (value: boolean) => void
   ) => {
     try {
-      console.log(`[${provider.toUpperCase()}] Callback URL:`, url);
-
       // Safely parse URL
       let parsedUrl: URL;
       try {
         parsedUrl = new URL(url);
-      } catch (parseError) {
-        console.error('Failed to parse callback URL:', parseError);
+      } catch {
         showError('Error', 'Invalid callback URL received');
         return;
       }
@@ -214,8 +207,7 @@ const LinkThirdPartyScreen = ({ navigation }: Props) => {
 
       setLinked(true);
       showSuccess('Success', `${provider} account linked successfully!`);
-    } catch (error) {
-      console.error(`[${provider.toUpperCase()}] Error processing callback:`, error);
+    } catch {
       showError('Error', 'Failed to process authentication response');
     }
   };

@@ -17,7 +17,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@/components/icons';
 import { MaterialIcons } from '@/components/icons';
 import { getAccessToken } from '@/utils/auth/session';
-import { debugLog } from '@/utils/debug/log';
 import { login, register } from '../../services/authService';
 import { showError, showInfo } from '../../utils/toast';
 import { useUserStore } from '../../utils/stores/userStore';
@@ -89,10 +88,6 @@ const SignUpScreen = ({ navigation }: Props) => {
 
       const savedToken = await getAccessToken();
       if (!savedToken) {
-        debugLog('[AUTH DEBUG] SignUp auto-login: token missing after saveUserToStore', {
-          userId: authData?.user?.id,
-          email: authData?.user?.email,
-        });
         throw new Error('Token was not persisted after signup auto-login');
       }
 
@@ -101,7 +96,6 @@ const SignUpScreen = ({ navigation }: Props) => {
         routes: [{ name: 'MainTabs' }],
       });
     } catch (error) {
-      console.log(error);
       showError('Failed Sign Up', 'Please try again later.');
     } finally {
       setIsLoading(false);
@@ -210,7 +204,11 @@ const SignUpScreen = ({ navigation }: Props) => {
                 <TouchableOpacity
                   onPress={() => setShowPassword(!showPassword)}
                   hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-                  <Feather name={showPassword ? 'eye' : 'eye-off'} size={20} color="#92adc9" />
+                  {showPassword ? (
+                    <Feather name="eye" size={20} color="#92adc9" />
+                  ) : (
+                    <Feather name="eye-off" size={20} color="#92adc9" />
+                  )}
                 </TouchableOpacity>
               </View>
 
