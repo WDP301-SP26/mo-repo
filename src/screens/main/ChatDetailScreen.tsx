@@ -73,9 +73,7 @@ const ChatDetailScreen = () => {
     useCallback(() => {
       setActiveConversation(conversationId);
 
-      // Immediately join the conversation room via socket so we receive
-      // chat:new events. This is especially important for conversations
-      // created after the socket connected (BE only joins rooms at connect time).
+      // Join the conversation room via socket so we receive chat:new events.
       chatSocket.sendRead(conversationId);
 
       // Always reload messages on focus to pick up any missed messages.
@@ -85,8 +83,15 @@ const ChatDetailScreen = () => {
 
       markConversationAsRead(conversationId);
 
+      // Polling fallback: if the lecturer sends via REST (no socket broadcast),
+      // the socket never emits chat:new. Poll every 4 s to catch those messages.
+      const pollTimer = setInterval(() => {
+        loadMessages(conversationId, { reset: true }).catch(() => {});
+      }, 4_000);
+
       return () => {
         setActiveConversation(null);
+        clearInterval(pollTimer);
       };
     }, [conversationId, loadMessages, markConversationAsRead, setActiveConversation])
   );
@@ -105,10 +110,11 @@ const ChatDetailScreen = () => {
     if (!conversationId) return;
     if (connectionState !== 'connected') return;
 
-    // If focus happened before socket connected, this ensures the client
-    // joins the conversation room immediately after reconnect.
+    // After (re)connect: join the conversation room and catch up on any
+    // messages that arrived while the socket was disconnected.
     chatSocket.sendRead(conversationId);
-  }, [connectionState, conversationId]);
+    loadMessages(conversationId, { reset: true }).catch(() => {});
+  }, [connectionState, conversationId, loadMessages]);
 
   const handleTyping = (text: string) => {
     setInput(text);

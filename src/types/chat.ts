@@ -28,7 +28,10 @@ export interface LocalChatMessage extends ChatMessage {
 
 export interface ChatConversation {
   id: string;
-  counterpart: ChatParticipant;
+  isGroupRoom: boolean;
+  groupId?: string | null;
+  groupName?: string | null;
+  counterpart?: ChatParticipant | null;
   classCode: string;
   semesterName: string;
   status: string;

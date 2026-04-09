@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { Modal, View, Text, TouchableOpacity, ScrollView } from 'react-native';
 import { Feather } from '@/components/icons';
 
@@ -63,9 +63,7 @@ const DatePickerModal = ({
   const [selected, setSelected] = useState<Date>(initial);
   const [showYearPicker, setShowYearPicker] = useState(false);
 
-  useEffect(() => {
-    if (!visible) return;
-
+  const syncVisibleState = () => {
     const baseTs = valueTs ?? todayStartTs;
     const nextTs = minDateTs !== null && baseTs < minDateTs ? minDateTs : baseTs;
     const nextSelected = new Date(nextTs);
@@ -77,7 +75,7 @@ const DatePickerModal = ({
     setViewYear((prev) => (prev === nextSelected.getFullYear() ? prev : nextSelected.getFullYear()));
     setViewMonth((prev) => (prev === nextSelected.getMonth() ? prev : nextSelected.getMonth()));
     setShowYearPicker(false);
-  }, [minDateTs, todayStartTs, valueTs, visible]);
+  };
 
   const daysInMonth = getDaysInMonth(viewYear, viewMonth);
   const firstDay = getFirstDayOfMonth(viewYear, viewMonth);
@@ -118,7 +116,12 @@ const DatePickerModal = ({
   while (cells.length % 7 !== 0) cells.push(null);
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onCancel}>
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      onRequestClose={onCancel}
+      onShow={syncVisibleState}>
       <View
         className="flex-1 items-center justify-center px-4"
         style={{ backgroundColor: 'rgba(0,0,0,0.65)' }}>

@@ -185,14 +185,6 @@ const CreateGroupScreen = () => {
   const [newRepoDesc, setNewRepoDesc] = useState('');
   const [creatingRepo, setCreatingRepo] = useState(false);
 
-  const isFormComplete =
-    !!formData.name?.trim() &&
-    !!formData.project_name?.trim() &&
-    !!formData.description?.trim() &&
-    !!formData.semester?.trim() &&
-    !!formData.github_repo_url?.trim() &&
-    !!formData.jira_project_key?.trim();
-
   // ── Load Current Semester ───────────────
 
   useEffect(() => {

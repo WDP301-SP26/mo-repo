@@ -121,7 +121,7 @@ const LinkThirdPartyScreen = ({ navigation }: Props) => {
         setLinked(true);
         showSuccess('Success', `${provider} account linked successfully!`);
       }
-    } catch (error) {
+    } catch {
       showError('Error', `Failed to refresh ${provider} link status`);
     }
   };
@@ -159,7 +159,7 @@ const LinkThirdPartyScreen = ({ navigation }: Props) => {
         showInfo('Info', `${provider} connection was dismissed`);
         await syncLinkedStatus(provider, setLinked);
       }
-    } catch (error) {
+    } catch {
       showError('Error', `Failed to connect ${provider} account`);
     } finally {
       setIsLoading(false);

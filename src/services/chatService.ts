@@ -2,11 +2,11 @@ import axiosClient from '@/api/axiosConfig';
 import ENDPOINTS from '@/api/endpoint';
 import type { ChatConversation, ChatMessage, ChatMessagePage, ChatParticipant } from '@/types/chat';
 
-export type GetOrCreateConversationParams = {
+export type GetOrCreateGroupConversationParams = {
   semester_id: string;
   class_id: string;
-  student_id: string;
-  lecturer_id: string;
+  group_id: string;
+  lecturer_id?: string;
 };
 
 type RawChatParticipant = {
@@ -34,7 +34,10 @@ type RawChatMessage = {
 
 type RawChatConversation = {
   id: string;
-  counterpart: RawChatParticipant;
+  is_group_room?: boolean;
+  group_id?: string | null;
+  group_name?: string | null;
+  counterpart?: RawChatParticipant | null;
   class_code?: string;
   classCode?: string;
   semester_name?: string;
@@ -90,7 +93,10 @@ export const normalizeChatConversation = (raw: RawChatConversation): ChatConvers
 
   return {
     id: raw.id,
-    counterpart: normalizeChatParticipant(raw.counterpart),
+    isGroupRoom: raw.is_group_room ?? false,
+    groupId: raw.group_id ?? null,
+    groupName: raw.group_name ?? null,
+    counterpart: raw.counterpart ? normalizeChatParticipant(raw.counterpart) : null,
     classCode: raw.class_code ?? raw.classCode ?? '',
     semesterName: raw.semester_name ?? raw.semesterName ?? '',
     status: raw.status ?? 'ACTIVE',
@@ -138,11 +144,11 @@ export const listConversations = async (): Promise<ChatConversation[]> => {
   return rows.map(normalizeChatConversation);
 };
 
-export const createOrGetConversation = async (
-  params: GetOrCreateConversationParams
+export const createOrGetGroupConversation = async (
+  params: GetOrCreateGroupConversationParams
 ): Promise<ChatConversation> => {
   const response = await axiosClient.post<RawChatConversation>(
-    ENDPOINTS.CHAT.CREATE_CONVERSATION,
+    ENDPOINTS.CHAT.CREATE_GROUP_CONVERSATION,
     params
   );
   return normalizeChatConversation(response.data);

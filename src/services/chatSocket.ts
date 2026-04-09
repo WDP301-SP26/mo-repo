@@ -19,6 +19,7 @@ type ErrorListener = (event: ChatErrorPayload) => void;
 class ChatSocketManager {
   private socket: Socket | null = null;
   private connectionState: ChatConnectionState = 'disconnected';
+  private token: string | null = null;
 
   private connectionListeners = new Set<ConnectionListener>();
   private newMessageListeners = new Set<NewMessageListener>();
@@ -38,6 +39,8 @@ class ChatSocketManager {
     if (!accessToken) {
       throw new Error('Missing access token for chat socket');
     }
+
+    this.token = accessToken;
 
     if (this.socket?.connected) {
       return;
@@ -110,6 +113,18 @@ class ChatSocketManager {
       this.socket = null;
     }
     this.setConnectionState('disconnected');
+  }
+
+  // Force the server to re-run handleConnection so it re-joins any new conversation
+  // rooms that were created after the initial connect. Reuses the existing socket
+  // instance so event listeners stay intact.
+  rejoinRooms() {
+    const socket = this.socket;
+    if (!socket || this.connectionState === 'connecting') return;
+    if (socket.connected) {
+      socket.disconnect();
+    }
+    socket.connect();
   }
 
   // BE auto-joins conversation rooms on connect and on each chat:send/read/typing event.

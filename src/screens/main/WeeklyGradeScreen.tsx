@@ -26,7 +26,6 @@ import {
   type WeeklyGrade,
 } from '@/services/weeklyGradeService';
 import { showError, showSuccess } from '@/utils/toast';
-import { useUserStore } from '@/utils/stores/userStore';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -181,7 +180,6 @@ const WeeklyGradeScreen = () => {
   const route = useRoute<RouteProp<RootStackParamList, 'WeeklyGrade'>>();
   const { groupId, groupName, semesterId, currentWeek, isLecturer } = route.params;
 
-  const userInfo = useUserStore((s) => s.userInfo);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [grades, setGrades] = useState<WeeklyGrade[]>([]);

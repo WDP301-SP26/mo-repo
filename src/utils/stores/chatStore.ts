@@ -160,10 +160,23 @@ export const useChatStore = create<ChatState>()(
       loadConversations: async () => {
         if (get().loadingConversations) return;
 
+        const prevIds = new Set(get().conversations.map((c) => c.id));
+
         set({ loadingConversations: true });
         try {
           const rows = await listConversations();
           set({ conversations: sortConversations(rows) });
+
+          // If new conversation rooms appeared since the socket last connected,
+          // the socket is not in those rooms and won't receive chat:new events.
+          // Force a reconnect so handleConnection re-joins all current rooms.
+          // Skip if the user is currently in an active chat to avoid a brief
+          // disconnect that could drop incoming messages.
+          const hasNewConversations = rows.some((r) => !prevIds.has(r.id));
+          const isInActiveChat = !!get().activeConversationId;
+          if (hasNewConversations && chatSocket.isConnected() && !isInActiveChat) {
+            chatSocket.rejoinRooms();
+          }
         } finally {
           set({ loadingConversations: false });
         }

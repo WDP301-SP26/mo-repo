@@ -31,7 +31,7 @@ import {
   getGroupRepos,
 } from '@/services/groupService';
 import { getJiraProjects, checkJiraProjectAssignable } from '@/services/jiraService';
-import { getContributorStats, getCommits } from '@/services/githubService';
+import { getContributorStats, getCommits, getRepositories } from '@/services/githubService';
 import {
   createTask,
   deleteTask,
@@ -41,6 +41,7 @@ import {
   type TaskPriority,
   type TaskStatus,
 } from '@/services/taskService';
+import { getCurrentSemester, type SerializedSemester } from '@/services/semesterService';
 import { showSuccess, showError, showInfo } from '@/utils/toast';
 import type { GroupDetail, GroupMember, MembershipRole } from '@/types/group';
 import type { ContributorStat, GroupRepo } from '@/types/github';
@@ -146,6 +147,8 @@ const GroupDetailScreen = () => {
   const currentUser = useUserStore((s) => s.userInfo);
   const [group, setGroup] = useState<GroupDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [currentSemester, setCurrentSemester] = useState<SerializedSemester | null>(null);
+  const [checkingEditIntegrations, setCheckingEditIntegrations] = useState(false);
   const [jiraSiteUrl, setJiraSiteUrl] = useState<string | null>(null);
   const [memberJiraAccess, setMemberJiraAccess] = useState<boolean | null>(null);
 
@@ -186,6 +189,77 @@ const GroupDetailScreen = () => {
   const isLeader = currentMemberRole === 'LEADER';
   const isAdmin = currentMemberRole === 'MENTOR';
   const currentRank = ROLE_RANK[currentMemberRole || 'MEMBER'] ?? 0;
+  const isUpcomingSemester = (() => {
+    if (!currentSemester) return false;
+    if (currentSemester.status !== 'ACTIVE') return true;
+
+    const groupSemester = group?.semester?.trim().toUpperCase();
+    const currentCode = currentSemester.code?.trim().toUpperCase();
+    if (!groupSemester || !currentCode) return false;
+
+    return groupSemester !== currentCode;
+  })();
+
+  const blockUpcomingAction = () => {
+    if (!isUpcomingSemester) return false;
+    showInfo('This group is outside the current active semester. Action is read-only.');
+    return true;
+  };
+
+  const isIntegrationLinkError = (error: any): boolean => {
+    const payload = error?.response?.data;
+    const code = payload?.code;
+    const message = payload?.message;
+
+    if (
+      code === 'ACCOUNT_NOT_LINKED' ||
+      code === 'TOKEN_EXPIRED' ||
+      code === 'INSUFFICIENT_SCOPE' ||
+      payload?.reconnectRequired
+    ) {
+      return true;
+    }
+
+    const messageText = Array.isArray(message)
+      ? message.filter((m) => typeof m === 'string').join(' ')
+      : typeof message === 'string'
+        ? message
+        : '';
+
+    return /link|not linked|reconnect|token|oauth|github|jira/i.test(messageText);
+  };
+
+  const handleEditGroupPress = async () => {
+    if (blockUpcomingAction()) return;
+    if (checkingEditIntegrations) return;
+
+    try {
+      setCheckingEditIntegrations(true);
+
+      const [githubCheck, jiraCheck] = await Promise.allSettled([getRepositories(), getJiraProjects()]);
+
+      const missingProviders: string[] = [];
+
+      if (githubCheck.status === 'rejected' && isIntegrationLinkError(githubCheck.reason)) {
+        missingProviders.push('GitHub');
+      }
+
+      if (jiraCheck.status === 'rejected' && isIntegrationLinkError(jiraCheck.reason)) {
+        missingProviders.push('Jira');
+      }
+
+      if (missingProviders.length > 0) {
+        showError(`Please link ${missingProviders.join(' and ')} before editing this group.`);
+        return;
+      }
+
+      navigation.navigate('EditGroup', { groupId: group!.id });
+    } catch {
+      showError('Unable to verify linked accounts. Please try again.');
+    } finally {
+      setCheckingEditIntegrations(false);
+    }
+  };
 
   /** Check if current user outranks a target member */
   const canRemove = (target: GroupMember) =>
@@ -257,11 +331,15 @@ const GroupDetailScreen = () => {
 
     try {
       setLoading(true);
-      const data = await getGroupById(groupId);
+      const [data, semester] = await Promise.all([
+        getGroupById(groupId),
+        getCurrentSemester().catch(() => null),
+      ]);
 
       if (requestId !== fetchRequestIdRef.current) return;
 
       setGroup(data);
+      setCurrentSemester(semester);
       setLoading(false);
 
       // Primary UI is ready now. Load secondary data in background.
@@ -451,6 +529,8 @@ const GroupDetailScreen = () => {
   };
 
   const openCreateTaskModal = () => {
+    if (blockUpcomingAction()) return;
+
     setEditingTask(null);
     setFormTitle('');
     setFormDescription('');
@@ -464,6 +544,8 @@ const GroupDetailScreen = () => {
   };
 
   const openEditTaskModal = (task: TaskItem) => {
+    if (blockUpcomingAction()) return;
+
     if (task.status === 'DONE') {
       showInfo('Completed tasks cannot be edited.');
       return;
@@ -486,6 +568,8 @@ const GroupDetailScreen = () => {
   };
 
   const handleSaveTask = async () => {
+    if (blockUpcomingAction()) return;
+
     if (editingTask?.status === 'DONE') {
       setTaskFormError('Completed tasks cannot be edited.');
       return;
@@ -555,6 +639,7 @@ const GroupDetailScreen = () => {
   };
 
   const handleDeleteTask = (task: TaskItem) => {
+    if (blockUpcomingAction()) return;
     if (!crudEnabled) return;
 
     Alert.alert('Delete task', `Delete "${task.title}"?`, [
@@ -576,6 +661,8 @@ const GroupDetailScreen = () => {
   };
 
   const handleQuickMoveTask = async (task: TaskItem) => {
+    if (blockUpcomingAction()) return;
+
     const next = getNextStatus(task.status);
     try {
       await updateTask(task.id, { status: next });
@@ -599,6 +686,8 @@ const GroupDetailScreen = () => {
   };
 
   const handleMemberMarkDone = async (task: TaskItem) => {
+    if (blockUpcomingAction()) return;
+
     if (group?.jira_project_key) {
       if (memberJiraAccess === false) {
         alertJiraAccessRequired();
@@ -619,6 +708,8 @@ const GroupDetailScreen = () => {
   };
 
   const handleClaimTask = async (task: TaskItem) => {
+    if (blockUpcomingAction()) return;
+
     if (!currentUser?.id) return;
     if (group?.jira_project_key) {
       if (memberJiraAccess === false) {
@@ -663,6 +754,8 @@ const GroupDetailScreen = () => {
 
   /** Leave group */
   const handleLeaveGroup = () => {
+    if (blockUpcomingAction()) return;
+
     setModalConfig({
       icon: 'log-out',
       iconColor: '#F97316',
@@ -684,6 +777,8 @@ const GroupDetailScreen = () => {
 
   /** Delete group (leader only) */
   const handleDeleteGroup = () => {
+    if (blockUpcomingAction()) return;
+
     setModalConfig({
       icon: 'trash-2',
       iconColor: '#EF4444',
@@ -705,6 +800,8 @@ const GroupDetailScreen = () => {
 
   /** Remove member */
   const handleRemoveMember = (member: GroupMember) => {
+    if (blockUpcomingAction()) return;
+
     setShowActionSheet(false);
     setTimeout(() => {
       setModalConfig({
@@ -729,6 +826,8 @@ const GroupDetailScreen = () => {
 
   /** Change role */
   const handleChangeRole = async (member: GroupMember, newRole: MembershipRole) => {
+    if (blockUpcomingAction()) return;
+
     setShowActionSheet(false);
     try {
       await updateMemberRole(groupId, member.id, newRole);
@@ -796,7 +895,7 @@ const GroupDetailScreen = () => {
           </View>
 
           {/* Show ⋮ menu for leader/admin on lower-rank members only */}
-          {!isCurrentUser && (isLeader || isAdmin) && canRemove(member) && (
+          {!isCurrentUser && (isLeader || isAdmin) && canRemove(member) && !isUpcomingSemester && (
             <TouchableOpacity onPress={() => openMemberActions(member)} className="p-1">
               <Feather name="more-vertical" size={16} color="#64748B" />
             </TouchableOpacity>
@@ -846,12 +945,28 @@ const GroupDetailScreen = () => {
 
         {isLeader && (
           <TouchableOpacity
-            onPress={() => navigation.navigate('EditGroup', { groupId: group.id })}
-            className="h-10 w-10 items-center justify-center rounded-xl bg-[#1A2332]">
-            <Feather name="edit-2" size={18} color="#7C3AED" />
+            disabled={isUpcomingSemester || checkingEditIntegrations}
+            onPress={handleEditGroupPress}
+            className={`h-10 w-10 items-center justify-center rounded-xl ${
+              isUpcomingSemester || checkingEditIntegrations ? 'bg-[#334155]' : 'bg-[#1A2332]'
+            }`}>
+            {checkingEditIntegrations ? (
+              <ActivityIndicator size="small" color="#7C3AED" />
+            ) : (
+              <Feather name="edit-2" size={18} color="#7C3AED" />
+            )}
           </TouchableOpacity>
         )}
       </View>
+
+      {isUpcomingSemester && (
+        <View className="mx-4 mb-3 mt-1 flex-row items-start gap-2 rounded-xl bg-amber-900/30 px-3 py-2.5">
+          <Feather name="clock" size={14} color="#FCD34D" style={{ marginTop: 1 }} />
+          <Text className="flex-1 text-xs text-amber-300">
+            This group is outside the current active semester. Actions are in read-only mode.
+          </Text>
+        </View>
+      )}
 
       {/* ── Body ────────────────────────────────── */}
       <ScrollView
@@ -939,8 +1054,11 @@ const GroupDetailScreen = () => {
           <View className="mt-4 flex-row gap-2 border-t border-white/5 pt-3">
             {isLeader && (
               <TouchableOpacity
+                disabled={isUpcomingSemester}
                 onPress={() => navigation.navigate('TopicLab', { groupId: group.id })}
-                className="flex-1 items-center rounded-xl bg-[#243447] py-2.5"
+                className={`flex-1 items-center rounded-xl py-2.5 ${
+                  isUpcomingSemester ? 'bg-[#334155]' : 'bg-[#243447]'
+                }`}
                 activeOpacity={0.8}>
                 <Text className="text-xs font-semibold text-[#F59E0B]">Topic Lab</Text>
               </TouchableOpacity>
@@ -1083,10 +1201,15 @@ const GroupDetailScreen = () => {
             {isLeader && (
               <TouchableOpacity
                 onPress={openCreateTaskModal}
-                className={`rounded-lg px-3 py-2 ${crudEnabled ? 'bg-[#4C9AFF]/20' : 'bg-[#334155]'}`}
+                disabled={!crudEnabled || isUpcomingSemester}
+                className={`rounded-lg px-3 py-2 ${
+                  !crudEnabled || isUpcomingSemester ? 'bg-[#334155]' : 'bg-[#4C9AFF]/20'
+                }`}
                 activeOpacity={0.8}>
                 <Text
-                  className={`text-xs font-semibold ${crudEnabled ? 'text-[#93C5FD]' : 'text-gray-400'}`}>
+                  className={`text-xs font-semibold ${
+                    !crudEnabled || isUpcomingSemester ? 'text-gray-400' : 'text-[#93C5FD]'
+                  }`}>
                   + New Task
                 </Text>
               </TouchableOpacity>
@@ -1188,8 +1311,11 @@ const GroupDetailScreen = () => {
                         {/* Quick move — label changes based on current status */}
                         {task.status !== 'DONE' && (
                           <TouchableOpacity
+                            disabled={isUpcomingSemester}
                             onPress={() => handleQuickMoveTask(task)}
-                            className="h-8 w-8 items-center justify-center rounded-lg bg-[#243447]"
+                            className={`h-8 w-8 items-center justify-center rounded-lg ${
+                              isUpcomingSemester ? 'bg-[#334155]' : 'bg-[#243447]'
+                            }`}
                             activeOpacity={0.8}>
                             <Feather
                               name={task.status === 'IN_PROGRESS' ? 'rotate-ccw' : 'arrow-right'}
@@ -1200,15 +1326,21 @@ const GroupDetailScreen = () => {
                         )}
                         {task.status !== 'DONE' && (
                           <TouchableOpacity
+                            disabled={isUpcomingSemester}
                             onPress={() => openEditTaskModal(task)}
-                            className="h-8 w-8 items-center justify-center rounded-lg bg-[#243447]"
+                            className={`h-8 w-8 items-center justify-center rounded-lg ${
+                              isUpcomingSemester ? 'bg-[#334155]' : 'bg-[#243447]'
+                            }`}
                             activeOpacity={0.8}>
                             <Feather name="edit-2" size={14} color="#93C5FD" />
                           </TouchableOpacity>
                         )}
                         <TouchableOpacity
+                          disabled={isUpcomingSemester}
                           onPress={() => handleDeleteTask(task)}
-                          className="h-8 w-8 items-center justify-center rounded-lg bg-[#243447]"
+                          className={`h-8 w-8 items-center justify-center rounded-lg ${
+                            isUpcomingSemester ? 'bg-[#334155]' : 'bg-[#243447]'
+                          }`}
                           activeOpacity={0.8}>
                           <Feather name="trash-2" size={14} color="#F87171" />
                         </TouchableOpacity>
@@ -1223,8 +1355,11 @@ const GroupDetailScreen = () => {
                               task.assignee_name === currentMember?.email)) &&
                           task.status === 'IN_PROGRESS' && (
                             <TouchableOpacity
+                              disabled={isUpcomingSemester}
                               onPress={() => handleMemberMarkDone(task)}
-                              className="h-8 w-8 items-center justify-center rounded-lg bg-[#243447]"
+                              className={`h-8 w-8 items-center justify-center rounded-lg ${
+                                isUpcomingSemester ? 'bg-[#334155]' : 'bg-[#243447]'
+                              }`}
                               activeOpacity={0.8}>
                               <Feather name="check" size={14} color="#22C55E" />
                             </TouchableOpacity>
@@ -1232,8 +1367,11 @@ const GroupDetailScreen = () => {
                         {/* Claim — only if unassigned TODO */}
                         {!task.assignee_id && !task.assignee_name && task.status === 'TO_DO' && (
                           <TouchableOpacity
+                            disabled={isUpcomingSemester}
                             onPress={() => handleClaimTask(task)}
-                            className="h-8 w-8 items-center justify-center rounded-lg bg-[#243447]"
+                            className={`h-8 w-8 items-center justify-center rounded-lg ${
+                              isUpcomingSemester ? 'bg-[#334155]' : 'bg-[#243447]'
+                            }`}
                             activeOpacity={0.8}>
                             <Feather name="user-plus" size={14} color="#60A5FA" />
                           </TouchableOpacity>
@@ -1284,9 +1422,12 @@ const GroupDetailScreen = () => {
           {/* Evaluation Button — all members can view; label differs by role */}
           {currentMember && (
             <TouchableOpacity
+              disabled={isUpcomingSemester}
               onPress={() => navigation.navigate('Evaluation', { groupId: group.id })}
               activeOpacity={0.8}
-              className="flex-row items-center justify-center gap-2 rounded-xl bg-[#7C3AED] py-3.5">
+              className={`flex-row items-center justify-center gap-2 rounded-xl py-3.5 ${
+                isUpcomingSemester ? 'bg-[#334155]' : 'bg-[#7C3AED]'
+              }`}>
               <MaterialIcons name="assessment" size={18} color="#fff" />
               <Text className="font-semibold text-white">
                 {isLeader ? 'Evaluate Members' : 'View Evaluations'}
@@ -1308,9 +1449,12 @@ const GroupDetailScreen = () => {
           {/* Leave — any member (including leader) can leave */}
           {currentMember && (
             <TouchableOpacity
+              disabled={isUpcomingSemester}
               onPress={handleLeaveGroup}
               activeOpacity={0.8}
-              className="flex-row items-center justify-center gap-2 rounded-xl bg-red-500/10 py-3.5">
+              className={`flex-row items-center justify-center gap-2 rounded-xl py-3.5 ${
+                isUpcomingSemester ? 'bg-[#334155]' : 'bg-red-500/10'
+              }`}>
               <Feather name="log-out" size={16} color="#EF4444" />
               <Text className="font-semibold text-red-400">Leave Group</Text>
             </TouchableOpacity>
@@ -1318,9 +1462,12 @@ const GroupDetailScreen = () => {
 
           {isLeader && (
             <TouchableOpacity
+              disabled={isUpcomingSemester}
               onPress={handleDeleteGroup}
               activeOpacity={0.8}
-              className="flex-row items-center justify-center gap-2 rounded-xl bg-red-500/10 py-3.5">
+              className={`flex-row items-center justify-center gap-2 rounded-xl py-3.5 ${
+                isUpcomingSemester ? 'bg-[#334155]' : 'bg-red-500/10'
+              }`}>
               <Feather name="trash-2" size={16} color="#EF4444" />
               <Text className="font-semibold text-red-400">Delete Group</Text>
             </TouchableOpacity>

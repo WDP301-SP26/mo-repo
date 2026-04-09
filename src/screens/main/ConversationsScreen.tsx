@@ -62,7 +62,9 @@ const ConversationsScreen = () => {
 
   const renderItem = useCallback(
     ({ item }: { item: ChatConversation }) => {
-      const peerName = item.counterpart.fullName || 'Unknown user';
+      const displayName = item.isGroupRoom
+        ? (item.groupName ?? 'Group Chat')
+        : (item.counterpart?.fullName ?? 'Unknown user');
       return (
         <TouchableOpacity
           activeOpacity={0.85}
@@ -70,19 +72,26 @@ const ConversationsScreen = () => {
           onPress={() =>
             navigation.navigate('ChatDetail', {
               conversationId: item.id,
-              title: peerName,
+              title: displayName,
             })
           }>
           <View className="flex-row items-center justify-between">
             <View className="flex-1 pr-2">
-              <Text className="text-base font-semibold text-white" numberOfLines={1}>
-                {peerName}
-              </Text>
+              <View className="flex-row items-center gap-2">
+                <Text className="text-base font-semibold text-white" numberOfLines={1}>
+                  {displayName}
+                </Text>
+                {item.isGroupRoom && (
+                  <View className="rounded-md bg-[#7C3AED]/20 px-1.5 py-0.5">
+                    <Text className="text-[9px] font-bold text-[#A78BFA]">GROUP</Text>
+                  </View>
+                )}
+              </View>
               <Text className="mt-0.5 text-xs text-gray-500" numberOfLines={1}>
                 {item.classCode} · {item.semesterName}
               </Text>
               <Text className="mt-1 text-sm text-gray-400" numberOfLines={1}>
-                {item.lastMessage?.content || 'Start a new conversation'}
+                {item.lastMessage?.content || 'No messages yet'}
               </Text>
             </View>
             <View className="items-end">
@@ -141,7 +150,7 @@ const ConversationsScreen = () => {
               <Feather name="message-circle" size={46} color="#475569" />
               <Text className="mt-3 text-center text-gray-400">No conversations yet</Text>
               <Text className="mt-1 text-center text-xs text-gray-600">
-                Go to a class and tap the chat icon to message your lecturer
+                Go to a class, open your group and tap Group Chat to start
               </Text>
             </View>
           }

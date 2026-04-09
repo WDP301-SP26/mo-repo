@@ -15,9 +15,12 @@ import type { RouteProp } from '@react-navigation/native';
 
 import {
   getCurrentWeek,
+  getStudentPublishedScores,
   getStudentWarnings,
   getStudentReviewStatus,
+  type ReviewSessionTimelineItem,
   type SerializedSemester,
+  type StudentPublishedScoreGroup,
   type StudentWarning,
   type ComplianceClassSummary,
   type ReviewGroup,
@@ -46,6 +49,41 @@ const WARNING_ICONS: Record<string, string> = {
 
 const WEEK_STATUS_COLOR = (status: 'PASS' | 'FAIL') => (status === 'PASS' ? '#22C55E' : '#EF4444');
 
+const formatDate = (value?: string | null) => {
+  if (!value) return 'Unknown';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Unknown';
+  return date.toLocaleDateString();
+};
+
+const sortSessionsNewestFirst = (sessions: ReviewSessionTimelineItem[]) => {
+  return [...sessions].sort(
+    (a, b) => new Date(b.review_date).getTime() - new Date(a.review_date).getTime()
+  );
+};
+
+const SectionHeader = ({
+  title,
+  subtitle,
+  icon,
+}: {
+  title: string;
+  subtitle?: string;
+  icon: string;
+}) => (
+  <View className="mb-2 flex-row items-center justify-between">
+    <View className="flex-row items-center gap-2">
+      <View className="h-7 w-7 items-center justify-center rounded-lg bg-[#243447]">
+        <Feather name={icon} size={14} color="#A78BFA" />
+      </View>
+      <View>
+        <Text className="text-xs uppercase tracking-wider text-gray-300">{title}</Text>
+        {!!subtitle && <Text className="text-[11px] text-gray-500">{subtitle}</Text>}
+      </View>
+    </View>
+  </View>
+);
+
 // ── Component ──────────────────────────────────────────────────────────────────
 
 const SemesterStatusScreen = () => {
@@ -59,16 +97,18 @@ const SemesterStatusScreen = () => {
   const [complianceClasses, setComplianceClasses] = useState<ComplianceClassSummary[]>([]);
   const [milestone, setMilestone] = useState<ReviewMilestoneContext | null>(null);
   const [reviewGroups, setReviewGroups] = useState<ReviewGroup[]>([]);
+  const [publishedScoresByGroup, setPublishedScoresByGroup] = useState<StudentPublishedScoreGroup[]>([]);
 
   // ── Load ──────────────────────────────────────────────────────────────────────
 
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
-      const [weekRes, warningRes, reviewRes] = await Promise.allSettled([
+      const [weekRes, warningRes, reviewRes, scoreRes] = await Promise.allSettled([
         getCurrentWeek(),
         getStudentWarnings(),
         getStudentReviewStatus(),
+        getStudentPublishedScores(),
       ]);
 
       if (weekRes.status === 'fulfilled') {
@@ -96,6 +136,12 @@ const SemesterStatusScreen = () => {
         setMilestone(reviewRes.value.milestone);
         // Only show review for this specific group
         setReviewGroups(reviewRes.value.groups.filter((g) => g.group_id === groupId));
+      }
+
+      if (scoreRes.status === 'fulfilled') {
+        setPublishedScoresByGroup(scoreRes.value.groups.filter((g) => g.group_id === groupId));
+      } else {
+        setPublishedScoresByGroup([]);
       }
     } finally {
       setLoading(false);
@@ -150,6 +196,10 @@ const SemesterStatusScreen = () => {
         ? '#EAB308'
         : '#64748B';
 
+  const activeReviewGroup = reviewGroups[0] || null;
+  const activePublishedScore = publishedScoresByGroup[0] || null;
+  const reviewSessions = sortSessionsNewestFirst(activeReviewGroup?.review_sessions || []);
+
   return (
     <SafeAreaView className="flex-1 bg-[#101922]" edges={['top']}>
       <StatusBar barStyle="light-content" backgroundColor="#101922" />
@@ -172,7 +222,9 @@ const SemesterStatusScreen = () => {
         contentContainerStyle={{ paddingBottom: 40 }}
         showsVerticalScrollIndicator={false}>
         {/* ── Semester Info Card ──────────────────────────────── */}
-        <View className="mb-4 mt-2 rounded-2xl bg-[#1A2332] p-4">
+        <View className="mb-4 mt-2 rounded-2xl border border-white/5 bg-[#1A2332] p-4">
+          <SectionHeader title="Semester Overview" subtitle="Your current timeline" icon="calendar" />
+
           <View className="mb-3 flex-row items-center justify-between">
             <View className="flex-row items-center gap-2">
               <View className="h-2 w-2 rounded-full" style={{ backgroundColor: statusColor }} />
@@ -220,13 +272,15 @@ const SemesterStatusScreen = () => {
         {/* ── Active Warnings ─────────────────────────────────── */}
         {warnings.length > 0 && (
           <View className="mb-4">
-            <Text className="mb-2 text-xs uppercase tracking-wider text-gray-400">
-              Action Required
-            </Text>
+            <SectionHeader
+              title="Action Required"
+              subtitle="Items that may block your weekly progress"
+              icon="alert-triangle"
+            />
             {warnings.map((w, i) => (
               <View
                 key={i}
-                className="mb-2 flex-row items-start gap-3 rounded-2xl p-4"
+                className="mb-2 flex-row items-start gap-3 rounded-2xl border border-white/5 p-4"
                 style={{ backgroundColor: `${WARNING_COLORS[w.code] || '#EAB308'}18` }}>
                 <Feather
                   name={(WARNING_ICONS[w.code] || 'alert-triangle') as any}
@@ -250,11 +304,13 @@ const SemesterStatusScreen = () => {
         {/* ── Compliance / Week Checkpoints ───────────────────── */}
         {complianceClasses.length > 0 && (
           <View className="mb-4">
-            <Text className="mb-2 text-xs uppercase tracking-wider text-gray-400">
-              Weekly Checkpoints
-            </Text>
+            <SectionHeader
+              title="Weekly Checkpoints"
+              subtitle="Week 1 and Week 2 readiness checks"
+              icon="check-square"
+            />
             {complianceClasses.map((cls) => (
-              <View key={cls.class_id} className="mb-3 rounded-2xl bg-[#1A2332] p-4">
+              <View key={cls.class_id} className="mb-3 rounded-2xl border border-white/5 bg-[#1A2332] p-4">
                 <Text className="mb-3 text-sm font-bold text-white">
                   {cls.class_code}
                   <Text className="font-normal text-gray-500"> · {cls.class_name}</Text>
@@ -310,11 +366,33 @@ const SemesterStatusScreen = () => {
           </View>
         )}
 
+        {/* ── Published Checkpoint Scores (checkpoint-centric) ─ */}
+        <View className="mb-4 rounded-2xl border border-[#7C3AED]/20 bg-[#1A2332] p-4">
+          <SectionHeader
+            title="Published Checkpoint Scores"
+            subtitle="Official scores visible to students"
+            icon="award"
+          />
+
+          <View className="mb-2 mt-2 flex-row gap-2">
+            <ScoreBadge label="CP1" value={activePublishedScore?.checkpoints.checkpoint_1 ?? null} />
+            <ScoreBadge label="CP2" value={activePublishedScore?.checkpoints.checkpoint_2 ?? null} />
+            <ScoreBadge label="CP3" value={activePublishedScore?.checkpoints.checkpoint_3 ?? null} />
+            <ScoreBadge label="Total" value={activePublishedScore?.total_score ?? null} highlight />
+          </View>
+
+          {!activePublishedScore && (
+            <Text className="text-xs text-gray-500">
+              No published checkpoint scores yet. Values will appear as each checkpoint is published.
+            </Text>
+          )}
+        </View>
+
         {/* ── Review Milestone ────────────────────────────────── */}
         {milestone && reviewGroups.length > 0 && (
           <View className="mb-4">
-            <View className="mb-2 flex-row items-center justify-between">
-              <Text className="text-xs uppercase tracking-wider text-gray-400">Review Status</Text>
+            <View className="mb-2 flex-row items-center justify-between rounded-xl bg-[#1A2332] px-3 py-2">
+              <Text className="text-xs uppercase tracking-wider text-gray-300">Review Status</Text>
               <View className="rounded-lg bg-[#7C3AED]/20 px-2.5 py-1">
                 <Text className="text-xs font-semibold text-[#7C3AED]">
                   {MILESTONE_LABELS[milestone.code] || milestone.code}
@@ -331,8 +409,55 @@ const SemesterStatusScreen = () => {
           </View>
         )}
 
+        {/* ── Review Timeline (tracking only) ─────────────────── */}
+        {(activeReviewGroup || reviewSessions.length > 0) && (
+          <View className="mb-4 rounded-2xl border border-white/5 bg-[#1A2332] p-4">
+            <SectionHeader
+              title="Review Timeline"
+              subtitle="Progress tracking from your lecturer"
+              icon="clock"
+            />
+
+            {reviewSessions.length === 0 ? (
+              <Text className="text-xs text-gray-500">
+                No review sessions captured yet for this group.
+              </Text>
+            ) : (
+              <View className="mt-2 rounded-xl bg-[#243447] p-3">
+                {reviewSessions.slice(0, 4).map((session) => (
+                  <View
+                    key={session.id}
+                    className="mb-2 rounded-lg border border-white/5 bg-[#1A2332] p-2.5">
+                    <View className="flex-row items-start justify-between">
+                      <View className="mr-2 flex-1">
+                        <Text className="text-xs font-semibold text-white">
+                          {session.title || MILESTONE_LABELS[session.milestone_code] || session.milestone_code}
+                        </Text>
+                        <Text className="mt-0.5 text-[11px] text-gray-400">
+                          {formatDate(session.review_date)} · {session.status}
+                        </Text>
+                      </View>
+                      <Text className="text-[10px] text-gray-500">{session.review_day}</Text>
+                    </View>
+
+                    {!!session.lecturer_note && (
+                      <Text className="mt-1 text-xs text-gray-300" numberOfLines={3}>
+                        {session.lecturer_note}
+                      </Text>
+                    )}
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+        )}
+
         {/* No data fallback */}
-        {warnings.length === 0 && complianceClasses.length === 0 && !milestone && (
+        {warnings.length === 0 &&
+          complianceClasses.length === 0 &&
+          !milestone &&
+          !activePublishedScore &&
+          reviewSessions.length === 0 && (
           <View className="mt-16 items-center justify-center gap-3">
             <Feather name="check-circle" size={44} color="#334155" />
             <Text className="text-center text-sm text-gray-500">Everything looks good.</Text>
@@ -373,16 +498,6 @@ const ReviewGroupCard = ({ group }: { group: ReviewGroup }) => {
 
       {isReviewed ? (
         <>
-          {/* Scores */}
-          <View className="mb-3 flex-row gap-2">
-            <ScoreBadge label="Tasks" value={group.scores.task_progress_score} />
-            <ScoreBadge label="Commits" value={group.scores.commit_contribution_score} />
-            <ScoreBadge label="Milestone" value={group.scores.review_milestone_score} />
-            {group.scores.total_score !== null && (
-              <ScoreBadge label="Total" value={group.scores.total_score} highlight />
-            )}
-          </View>
-
           {/* Snapshot */}
           <View className="flex-row gap-4 rounded-xl bg-[#243447] p-3">
             <View className="flex-1 items-center">
@@ -451,16 +566,28 @@ const ScoreBadge = ({
   highlight,
 }: {
   label: string;
-  value: number | null;
+  value: number | string | null | undefined;
   highlight?: boolean;
-}) => (
-  <View
-    className={`flex-1 items-center rounded-xl py-2 ${highlight ? 'bg-[#7C3AED]/20' : 'bg-[#243447]'}`}>
-    <Text className={`text-sm font-bold ${highlight ? 'text-[#7C3AED]' : 'text-white'}`}>
-      {value !== null ? value.toFixed(1) : '–'}
-    </Text>
-    <Text className="mt-0.5 text-[10px] text-gray-500">{label}</Text>
-  </View>
-);
+}) => {
+  const numericValue =
+    typeof value === 'number'
+      ? value
+      : typeof value === 'string' && value.trim() !== ''
+        ? Number(value)
+        : null;
+
+  const displayValue =
+    numericValue !== null && Number.isFinite(numericValue) ? numericValue.toFixed(1) : '–';
+
+  return (
+    <View
+      className={`flex-1 items-center rounded-xl border py-2.5 ${highlight ? 'border-[#7C3AED]/30 bg-[#7C3AED]/20' : 'border-white/5 bg-[#243447]'}`}>
+      <Text className={`text-sm font-bold ${highlight ? 'text-[#7C3AED]' : 'text-white'}`}>
+        {displayValue}
+      </Text>
+      <Text className="mt-0.5 text-[10px] font-semibold text-gray-500">{label}</Text>
+    </View>
+  );
+};
 
 export default SemesterStatusScreen;

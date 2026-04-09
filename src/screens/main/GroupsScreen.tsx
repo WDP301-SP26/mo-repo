@@ -17,7 +17,8 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import { getGroups, joinGroup } from '@/services/groupService';
-import { showError, showSuccess } from '@/utils/toast';
+import { getCurrentSemester, type SerializedSemester } from '@/services/semesterService';
+import { showError, showInfo, showSuccess } from '@/utils/toast';
 import type { Group, GroupStatus } from '@/types/group';
 import type { RootStackParamList } from '@/navigation/AppNavigator';
 
@@ -42,10 +43,12 @@ const PublicGroupCard = React.memo(
     item,
     onJoinRequest,
     onPress,
+    interactionDisabled,
   }: {
     item: Group;
-    onJoinRequest: (id: string, name: string) => void;
+    onJoinRequest: (group: Group) => void;
     onPress: (id: string) => void;
+    interactionDisabled: boolean;
   }) => {
     const statusCfg = STATUS_CONFIG[item.status] || STATUS_CONFIG.ACTIVE;
 
@@ -97,11 +100,16 @@ const PublicGroupCard = React.memo(
             </Text>
           </View>
           <TouchableOpacity
-            onPress={() => onJoinRequest(item.id, item.name)}
+            disabled={interactionDisabled}
+            onPress={() => onJoinRequest(item)}
             activeOpacity={0.8}
-            className="flex-row items-center gap-1.5 rounded-xl bg-[#7C3AED] px-4 py-2">
+            className={`flex-row items-center gap-1.5 rounded-xl px-4 py-2 ${
+              interactionDisabled ? 'bg-[#334155]' : 'bg-[#7C3AED]'
+            }`}>
             <Feather name="user-plus" size={14} color="#fff" />
-            <Text className="text-xs font-semibold text-white">Join</Text>
+            <Text className="text-xs font-semibold text-white">
+              {interactionDisabled ? 'Locked' : 'Join'}
+            </Text>
           </TouchableOpacity>
         </View>
       </TouchableOpacity>
@@ -128,6 +136,7 @@ const GroupsScreen = () => {
 
   // ── State ────────────────────────────────────────
   const [publicGroups, setPublicGroups] = useState<Group[]>([]);
+  const [currentSemester, setCurrentSemester] = useState<SerializedSemester | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -137,6 +146,23 @@ const GroupsScreen = () => {
   const [loadingMore, setLoadingMore] = useState(false);
 
   const isMounted = useRef(true);
+
+  const isGroupInteractionLocked = useCallback(
+    (groupItem: Group | null | undefined) => {
+      if (!groupItem || !currentSemester) return false;
+
+      if (currentSemester.status !== 'ACTIVE') return true;
+
+      const itemSemester = groupItem.semester?.trim().toUpperCase();
+      const currentCode = currentSemester.code?.trim().toUpperCase();
+      if (!itemSemester || !currentCode) return false;
+
+      return itemSemester !== currentCode;
+    },
+    [currentSemester]
+  );
+
+  const isCreateLocked = !!currentSemester && currentSemester.status !== 'ACTIVE';
 
   // ── Fetch Groups ─────────────────────────────────
 
@@ -150,6 +176,7 @@ const GroupsScreen = () => {
           limit: 20,
           search: searchQuery.trim() || undefined,
         });
+        const semester = await getCurrentSemester().catch(() => null);
 
         if (!isMounted.current) return;
 
@@ -161,6 +188,7 @@ const GroupsScreen = () => {
 
         setPage(pageNum);
         setTotalPages(result.meta.total_pages);
+        setCurrentSemester(semester);
       } catch (error: any) {
         if (!isMounted.current) return;
         showError(error.response?.data?.message || 'Failed to load groups');
@@ -209,21 +237,31 @@ const GroupsScreen = () => {
   );
 
   const handleJoinRequest = useCallback(
-    async (groupId: string, groupName: string) => {
+    async (groupItem: Group) => {
+      if (isGroupInteractionLocked(groupItem)) {
+        showInfo('This group is outside the current active semester. Join is read-only.');
+        return;
+      }
+
       try {
-        await joinGroup(groupId);
-        showSuccess(`Joined ${groupName} successfully`, 'Enrolled 🎉');
+        await joinGroup(groupItem.id);
+        showSuccess(`Joined ${groupItem.name} successfully`, 'Enrolled 🎉');
         fetchGroups(1, true);
       } catch (error: any) {
         showError(error.response?.data?.message || 'Failed to join group');
       }
     },
-    [fetchGroups]
+    [fetchGroups, isGroupInteractionLocked]
   );
 
   const handleCreatePress = useCallback(() => {
+    if (isCreateLocked) {
+      showInfo('Current semester is not ACTIVE. Group creation is read-only.');
+      return;
+    }
+
     navigation.navigate('CreateGroup');
-  }, [navigation]);
+  }, [navigation, isCreateLocked]);
 
   const handleClearSearch = useCallback(() => {
     setSearchQuery('');
@@ -233,10 +271,20 @@ const GroupsScreen = () => {
 
   const renderPublicGroup = useCallback(
     ({ item }: { item: Group }) => (
-      <PublicGroupCard item={item} onJoinRequest={handleJoinRequest} onPress={handleGroupPress} />
+      <PublicGroupCard
+        item={item}
+        onJoinRequest={handleJoinRequest}
+        onPress={handleGroupPress}
+        interactionDisabled={isGroupInteractionLocked(item)}
+      />
     ),
-    [handleGroupPress, handleJoinRequest]
+    [handleGroupPress, handleJoinRequest, isGroupInteractionLocked]
   );
+
+  const hasReadOnlySemesterItems = useMemo(() => {
+    if (!currentSemester) return false;
+    return publicGroups.some((item) => isGroupInteractionLocked(item));
+  }, [publicGroups, currentSemester, isGroupInteractionLocked]);
 
   const keyExtractor = useCallback((item: Group) => item.id, []);
 
@@ -263,12 +311,25 @@ const GroupsScreen = () => {
           <Text className="mt-0.5 text-sm text-gray-400">Browse and join a team</Text>
         </View>
         <TouchableOpacity
+          disabled={isCreateLocked}
           onPress={handleCreatePress}
           activeOpacity={0.8}
-          className="h-10 w-10 items-center justify-center rounded-xl bg-[#7C3AED]">
+          className={`h-10 w-10 items-center justify-center rounded-xl ${
+            isCreateLocked ? 'bg-[#334155]' : 'bg-[#7C3AED]'
+          }`}>
           <Feather name="plus" size={20} color="#fff" />
         </TouchableOpacity>
       </View>
+
+      {hasReadOnlySemesterItems && (
+        <View className="mx-4 mb-3 mt-1 flex-row items-start gap-2 rounded-xl bg-amber-900/30 px-3 py-2.5">
+          <Feather name="clock" size={14} color="#FCD34D" style={{ marginTop: 1 }} />
+          <Text className="flex-1 text-xs text-amber-300">
+            Some groups are outside the current active semester. You can view them, but joining is
+            disabled.
+          </Text>
+        </View>
+      )}
 
       {/* Search (only when browsing public groups or always visible) */}
       <View className="mb-3 px-4">

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   View,
   Text,
@@ -30,7 +30,6 @@ import {
   type SRSVersion,
 } from '@/services/srsService';
 import { showError, showSuccess } from '@/utils/toast';
-import { useUserStore } from '@/utils/stores/userStore';
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -117,12 +116,10 @@ const SaveVersionModal = ({
   const [summary, setSummary] = useState('');
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    if (visible) {
-      setContent(initialContent);
-      setSummary('');
-    }
-  }, [visible, initialContent]);
+  const handleModalShow = () => {
+    setContent(initialContent);
+    setSummary('');
+  };
 
   const handleSave = async () => {
     if (!content.trim()) {
@@ -135,7 +132,7 @@ const SaveVersionModal = ({
   };
 
   return (
-    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
+    <Modal visible={visible} animationType="slide" onRequestClose={onClose} onShow={handleModalShow}>
       <SafeAreaView className="flex-1 bg-[#101922]" edges={['top']}>
         <KeyboardAvoidingView
           className="flex-1"
@@ -194,7 +191,6 @@ const SRSEditorScreen = () => {
   const route = useRoute<RouteProp<RootStackParamList, 'SRSEditor'>>();
   const { groupId } = route.params;
 
-  const userInfo = useUserStore((s) => s.userInfo);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [document, setDocument] = useState<SRSDocument | null>(null);

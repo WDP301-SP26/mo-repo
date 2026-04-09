@@ -95,7 +95,7 @@ const SignUpScreen = ({ navigation }: Props) => {
         index: 0,
         routes: [{ name: 'MainTabs' }],
       });
-    } catch (error) {
+    } catch {
       showError('Failed Sign Up', 'Please try again later.');
     } finally {
       setIsLoading(false);

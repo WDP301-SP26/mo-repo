@@ -17,9 +17,9 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
 
 import { getGroupsByClass, joinGroup } from '@/services/groupService';
-import { createOrGetConversation } from '@/services/chatService';
-import { getCurrentWeek } from '@/services/semesterService';
-import { showError, showSuccess } from '@/utils/toast';
+import { createOrGetGroupConversation } from '@/services/chatService';
+import { getCurrentSemester, getCurrentWeek, type SerializedSemester } from '@/services/semesterService';
+import { showError, showInfo, showSuccess } from '@/utils/toast';
 import type { Group } from '@/types/group';
 import type { RootStackParamList } from '@/navigation/AppNavigator';
 import { useUserStore } from '@/utils/stores/userStore';
@@ -38,12 +38,18 @@ const GroupCard = React.memo(
     item,
     onPress,
     onJoin,
+    onChat,
     isMine,
+    chatLoading,
+    interactionDisabled,
   }: {
     item: ClassGroup;
     onPress: (id: string) => void;
     onJoin: (id: string, name: string) => void;
+    onChat: (id: string) => void;
     isMine: boolean;
+    chatLoading: boolean;
+    interactionDisabled: boolean;
   }) => {
     const isEmpty = item.members_count === 0;
 
@@ -103,12 +109,28 @@ const GroupCard = React.memo(
               {item.members_count} member{item.members_count !== 1 ? 's' : ''}
             </Text>
           </View>
-          {!isMine && (
+          {isMine ? (
             <TouchableOpacity
+              onPress={() => onChat(item.id)}
+              disabled={chatLoading || interactionDisabled}
+              activeOpacity={0.8}
+              className={`flex-row items-center gap-1.5 rounded-xl px-4 py-2 ${
+                interactionDisabled ? 'bg-[#334155]' : 'bg-[#243447]'
+              }`}>
+              {chatLoading ? (
+                <ActivityIndicator size="small" color="#A78BFA" />
+              ) : (
+                <Feather name="message-circle" size={14} color="#A78BFA" />
+              )}
+              <Text className="text-xs font-semibold text-[#A78BFA]">Group Chat</Text>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              disabled={interactionDisabled}
               onPress={() => onJoin(item.id, item.name)}
               activeOpacity={0.8}
               className={`flex-row items-center gap-1.5 rounded-xl px-4 py-2 ${
-                isEmpty ? 'bg-[#7C3AED]' : 'bg-[#243447]'
+                interactionDisabled ? 'bg-[#334155]' : isEmpty ? 'bg-[#7C3AED]' : 'bg-[#243447]'
               }`}>
               <Feather
                 name={isEmpty ? 'log-in' : 'user-plus'}
@@ -116,8 +138,10 @@ const GroupCard = React.memo(
                 color={isEmpty ? '#fff' : '#A78BFA'}
               />
               <Text
-                className={`text-xs font-semibold ${isEmpty ? 'text-white' : 'text-[#A78BFA]'}`}>
-                Join
+                className={`text-xs font-semibold ${
+                  interactionDisabled ? 'text-white' : isEmpty ? 'text-white' : 'text-[#A78BFA]'
+                }`}>
+                {interactionDisabled ? 'Locked' : 'Join'}
               </Text>
             </TouchableOpacity>
           )}
@@ -132,16 +156,29 @@ const GroupCard = React.memo(
 const ClassDetailScreen = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<RouteProp<RootStackParamList, 'ClassDetail'>>();
-  const { classId, lecturerId } = route.params;
+  const { classId } = route.params;
 
   const [groups, setGroups] = useState<ClassGroup[]>([]);
+  const [currentSemester, setCurrentSemester] = useState<SerializedSemester | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [chatLoading, setChatLoading] = useState(false);
+  const [chatLoadingGroupId, setChatLoadingGroupId] = useState<string | null>(null);
   const currentUser = useUserStore((s) => s.userInfo);
 
-  const isStudent = currentUser?.role === 'STUDENT' || currentUser?.role === 'GROUP_LEADER';
-  const canChat = isStudent && !!lecturerId;
+  const isGroupInteractionLocked = useCallback(
+    (groupItem: ClassGroup | null | undefined) => {
+      if (!groupItem || !currentSemester) return false;
+
+      if (currentSemester.status !== 'ACTIVE') return true;
+
+      const groupSemester = groupItem.semester?.trim().toUpperCase();
+      const currentCode = currentSemester.code?.trim().toUpperCase();
+      if (!groupSemester || !currentCode) return false;
+
+      return groupSemester !== currentCode;
+    },
+    [currentSemester]
+  );
 
   // Check if user joined any group → filter to only show their group
   const myGroup = groups.find((g) => g.members?.some((m) => m.user_id === currentUser?.id));
@@ -153,8 +190,12 @@ const ClassDetailScreen = () => {
     async (isRefresh = false) => {
       try {
         if (!isRefresh) setLoading(true);
-        const data = await getGroupsByClass(classId);
+        const [data, semester] = await Promise.all([
+          getGroupsByClass(classId),
+          getCurrentSemester().catch(() => null),
+        ]);
         setGroups(data as ClassGroup[]);
+        setCurrentSemester(semester);
       } catch (error: any) {
         showError(error.response?.data?.message || 'Failed to load groups');
       } finally {
@@ -190,6 +231,12 @@ const ClassDetailScreen = () => {
 
   const handleJoinGroup = useCallback(
     async (groupId: string, groupName: string) => {
+      const targetGroup = groups.find((g) => g.id === groupId) ?? null;
+      if (isGroupInteractionLocked(targetGroup)) {
+        showInfo('This group is outside the current active semester. Join is read-only.');
+        return;
+      }
+
       try {
         const result = await joinGroup(groupId);
         showSuccess(`Joined ${groupName} as ${result.role_assigned}`, 'Welcome! 🎉');
@@ -198,50 +245,75 @@ const ClassDetailScreen = () => {
         showError(error.response?.data?.message || 'Failed to join group');
       }
     },
-    [fetchGroups]
+    [fetchGroups, groups, isGroupInteractionLocked]
   );
 
-  // ── Chat with Lecturer ───────────────────────────
+  // ── Chat with Group ──────────────────────────────
 
-  const handleChatWithLecturer = useCallback(async () => {
-    if (!canChat || !currentUser) return;
-    setChatLoading(true);
-    try {
-      const { semester } = await getCurrentWeek();
-      if (!semester) {
-        showError('No active semester found');
+  const handleChatWithGroup = useCallback(
+    async (groupId: string) => {
+      if (!currentUser) return;
+
+      const targetGroup = groups.find((g) => g.id === groupId) ?? null;
+      if (isGroupInteractionLocked(targetGroup)) {
+        showInfo('This group is outside the current active semester. Chat is read-only.');
         return;
       }
-      const conversation = await createOrGetConversation({
-        semester_id: semester.id,
-        class_id: classId,
-        student_id: currentUser.id,
-        lecturer_id: lecturerId!,
-      });
-      navigation.navigate('ChatDetail', {
-        conversationId: conversation.id,
-        title: conversation.counterpart.fullName,
-      });
-    } catch (error: any) {
-      showError(error?.response?.data?.message || 'Unable to open conversation');
-    } finally {
-      setChatLoading(false);
-    }
-  }, [canChat, classId, currentUser, lecturerId, navigation]);
+
+      setChatLoadingGroupId(groupId);
+      try {
+        const { semester } = await getCurrentWeek();
+        if (!semester) {
+          showError('No active semester found');
+          return;
+        }
+        const group = groups.find((g) => g.id === groupId);
+        const conversation = await createOrGetGroupConversation({
+          semester_id: semester.id,
+          class_id: classId,
+          group_id: groupId,
+        });
+        navigation.navigate('ChatDetail', {
+          conversationId: conversation.id,
+          title: group?.name ?? conversation.groupName ?? 'Group Chat',
+        });
+      } catch (error: any) {
+        showError(error?.response?.data?.message || 'Unable to open group chat');
+      } finally {
+        setChatLoadingGroupId(null);
+      }
+    },
+    [classId, currentUser, groups, navigation, isGroupInteractionLocked]
+  );
 
   // ── Render ───────────────────────────────────────
 
   const renderGroup = useCallback(
-    ({ item }: { item: ClassGroup }) => (
-      <GroupCard
-        item={item}
-        onPress={handleGroupPress}
-        onJoin={handleJoinGroup}
-        isMine={item.members?.some((m) => m.user_id === currentUser?.id) ?? false}
-      />
-    ),
-    [handleGroupPress, handleJoinGroup, currentUser]
+    ({ item }: { item: ClassGroup }) => {
+      const isMine = item.members?.some((m) => m.user_id === currentUser?.id) ?? false;
+      return (
+        <GroupCard
+          item={item}
+          onPress={handleGroupPress}
+          onJoin={handleJoinGroup}
+          onChat={handleChatWithGroup}
+          isMine={isMine}
+          chatLoading={chatLoadingGroupId === item.id}
+          interactionDisabled={isGroupInteractionLocked(item)}
+        />
+      );
+    },
+    [
+      handleGroupPress,
+      handleJoinGroup,
+      handleChatWithGroup,
+      chatLoadingGroupId,
+      currentUser,
+      isGroupInteractionLocked,
+    ]
   );
+
+  const hasReadOnlySemesterItems = displayGroups.some((item) => isGroupInteractionLocked(item));
 
   const keyExtractor = useCallback((item: ClassGroup) => item.id, []);
 
@@ -264,19 +336,16 @@ const ClassDetailScreen = () => {
               : `${groups.length} group${groups.length !== 1 ? 's' : ''} available`}
           </Text>
         </View>
-        {canChat && (
-          <TouchableOpacity
-            onPress={handleChatWithLecturer}
-            disabled={chatLoading}
-            className="ml-2 h-10 w-10 items-center justify-center rounded-xl bg-[#1A2332]">
-            {chatLoading ? (
-              <ActivityIndicator size="small" color="#A78BFA" />
-            ) : (
-              <Feather name="message-circle" size={20} color="#A78BFA" />
-            )}
-          </TouchableOpacity>
-        )}
       </View>
+
+      {hasReadOnlySemesterItems && (
+        <View className="mx-4 mb-3 mt-1 flex-row items-start gap-2 rounded-xl bg-amber-900/30 px-3 py-2.5">
+          <Feather name="clock" size={14} color="#FCD34D" style={{ marginTop: 1 }} />
+          <Text className="flex-1 text-xs text-amber-300">
+            Some groups are outside the current active semester. Join/chat actions are disabled.
+          </Text>
+        </View>
+      )}
 
       {/* Content */}
       {loading ? (

@@ -56,7 +56,14 @@ export const groupFormSchema = z.object({
 
 export const documentSubmissionSchema = z.object({
   title: z.string().trim().min(1, 'Title is required'),
-  documentUrl: z.string().trim().min(1, 'Document URL is required').url('Document URL is invalid'),
+  documentUrl: z
+    .string()
+    .trim()
+    .optional()
+    .refine((value) => !value || /^https?:\/\//i.test(value), 'Document URL is invalid'),
+  reference: z.string().trim().optional(),
+  changeSummary: z.string().trim().optional(),
+  contentMarkdown: z.string().optional(),
 });
 
 export const topicGenerateSchema = z.object({

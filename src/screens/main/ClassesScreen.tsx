@@ -19,7 +19,8 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import { getAllClasses, getMyClasses, joinClass } from '@/services/classService';
-import { showError, showSuccess } from '@/utils/toast';
+import { getCurrentSemester, type SerializedSemester } from '@/services/semesterService';
+import { showError, showInfo, showSuccess } from '@/utils/toast';
 import type { ClassItem, ClassStatus } from '@/types/class';
 import type { RootStackParamList } from '@/navigation/AppNavigator';
 import { enrollmentKeySchema, getZodErrorMessage } from '@/utils/validation/formSchemas';
@@ -37,8 +38,21 @@ const STATUS_CONFIG: Record<ClassStatus, { label: string; color: string; bg: str
 // ==================== Memoized Components ====================
 
 const MyClassCard = React.memo(
-  ({ item, onPress }: { item: ClassItem; onPress: (id: string, lecturerId: string) => void }) => {
+  ({
+    item,
+    onPress,
+    interactionDisabled,
+  }: {
+    item: ClassItem;
+    onPress: (id: string, lecturerId: string) => void;
+    interactionDisabled: boolean;
+  }) => {
     const statusCfg = STATUS_CONFIG[item.status] || STATUS_CONFIG.ONGOING;
+    const badgeLabel =
+      item.status === 'ONGOING' ? (interactionDisabled ? 'Upcoming' : 'Ongoing') : statusCfg.label;
+    const badgeColor = item.status === 'ONGOING' && interactionDisabled ? '#F59E0B' : statusCfg.color;
+    const badgeBg =
+      item.status === 'ONGOING' && interactionDisabled ? 'rgba(245,158,11,0.2)' : statusCfg.bg;
 
     return (
       <TouchableOpacity
@@ -48,9 +62,9 @@ const MyClassCard = React.memo(
         <View className="flex-row items-start justify-between">
           <View className="flex-1">
             <View className="mb-1.5 flex-row items-center gap-2">
-              <View className="rounded-md px-2 py-0.5" style={{ backgroundColor: statusCfg.bg }}>
-                <Text className="text-[10px] font-semibold" style={{ color: statusCfg.color }}>
-                  {statusCfg.label}
+              <View className="rounded-md px-2 py-0.5" style={{ backgroundColor: badgeBg }}>
+                <Text className="text-[10px] font-semibold" style={{ color: badgeColor }}>
+                  {badgeLabel}
                 </Text>
               </View>
               {item.semester && <Text className="text-xs text-gray-500">{item.semester}</Text>}
@@ -66,8 +80,21 @@ const MyClassCard = React.memo(
 );
 
 const BrowseClassCard = React.memo(
-  ({ item, onJoin }: { item: ClassItem; onJoin: (item: ClassItem) => void }) => {
+  ({
+    item,
+    onJoin,
+    interactionDisabled,
+  }: {
+    item: ClassItem;
+    onJoin: (item: ClassItem) => void;
+    interactionDisabled: boolean;
+  }) => {
     const statusCfg = STATUS_CONFIG[item.status] || STATUS_CONFIG.ONGOING;
+    const badgeLabel =
+      item.status === 'ONGOING' ? (interactionDisabled ? 'Upcoming' : 'Ongoing') : statusCfg.label;
+    const badgeColor = item.status === 'ONGOING' && interactionDisabled ? '#F59E0B' : statusCfg.color;
+    const badgeBg =
+      item.status === 'ONGOING' && interactionDisabled ? 'rgba(245,158,11,0.2)' : statusCfg.bg;
 
     return (
       <TouchableOpacity
@@ -77,9 +104,9 @@ const BrowseClassCard = React.memo(
         <View className="flex-row items-start justify-between">
           <View className="flex-1">
             <View className="mb-1.5 flex-row items-center gap-2">
-              <View className="rounded-md px-2 py-0.5" style={{ backgroundColor: statusCfg.bg }}>
-                <Text className="text-[10px] font-semibold" style={{ color: statusCfg.color }}>
-                  {statusCfg.label}
+              <View className="rounded-md px-2 py-0.5" style={{ backgroundColor: badgeBg }}>
+                <Text className="text-[10px] font-semibold" style={{ color: badgeColor }}>
+                  {badgeLabel}
                 </Text>
               </View>
               {item.semester && <Text className="text-xs text-gray-500">{item.semester}</Text>}
@@ -98,11 +125,16 @@ const BrowseClassCard = React.memo(
             </Text>
           </View>
           <TouchableOpacity
+            disabled={interactionDisabled}
             onPress={() => onJoin(item)}
             activeOpacity={0.8}
-            className="flex-row items-center gap-1.5 rounded-xl bg-[#7C3AED] px-4 py-2">
+            className={`flex-row items-center gap-1.5 rounded-xl px-4 py-2 ${
+              interactionDisabled ? 'bg-[#334155]' : 'bg-[#7C3AED]'
+            }`}>
             <Feather name="log-in" size={14} color="#fff" />
-            <Text className="text-xs font-semibold text-white">Join</Text>
+            <Text className="text-xs font-semibold text-white">
+              {interactionDisabled ? 'Locked' : 'Join'}
+            </Text>
           </TouchableOpacity>
         </View>
       </TouchableOpacity>
@@ -126,6 +158,7 @@ const ClassesScreen = () => {
   // ── State ────────────────────────────────────────
   const [allClasses, setAllClasses] = useState<ClassItem[]>([]);
   const [myClasses, setMyClasses] = useState<ClassItem[]>([]);
+  const [currentSemester, setCurrentSemester] = useState<SerializedSemester | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -136,6 +169,22 @@ const ClassesScreen = () => {
   const [joining, setJoining] = useState(false);
 
   const isMounted = useRef(true);
+
+  const isClassInteractionLocked = useCallback(
+    (classItem: ClassItem | null) => {
+      if (!classItem || !currentSemester) return false;
+
+      // Student interactions are allowed only in the current ACTIVE semester.
+      if (currentSemester.status !== 'ACTIVE') return true;
+
+      const itemSemester = classItem.semester?.trim().toUpperCase();
+      const currentCode = currentSemester.code?.trim().toUpperCase();
+      if (!itemSemester || !currentCode) return false;
+
+      return itemSemester !== currentCode;
+    },
+    [currentSemester]
+  );
 
   // ── Derived: filter out already-enrolled classes from browse list ──
   const myClassIds = useMemo(() => new Set(myClasses.map((c) => c.id)), [myClasses]);
@@ -150,11 +199,16 @@ const ClassesScreen = () => {
     try {
       if (!isRefresh) setLoading(true);
 
-      const [all, mine] = await Promise.all([getAllClasses(), getMyClasses()]);
+      const [all, mine, semester] = await Promise.all([
+        getAllClasses(),
+        getMyClasses(),
+        getCurrentSemester().catch(() => null),
+      ]);
 
       if (!isMounted.current) return;
       setAllClasses(all);
       setMyClasses(mine);
+      setCurrentSemester(semester);
     } catch (error: any) {
       if (!isMounted.current) return;
       showError(error.response?.data?.message || 'Failed to load classes');
@@ -189,13 +243,23 @@ const ClassesScreen = () => {
   // ── Join Class ───────────────────────────────────
 
   const openJoinModal = useCallback((classItem: ClassItem) => {
+    if (isClassInteractionLocked(classItem)) {
+      showInfo('This class is outside the current active semester. Enrollment is read-only.');
+      return;
+    }
+
     setSelectedClass(classItem);
     setEnrollmentKey('');
     setJoinModalVisible(true);
-  }, []);
+  }, [isClassInteractionLocked]);
 
   const handleJoinClass = useCallback(async () => {
     if (!selectedClass) return;
+
+    if (isClassInteractionLocked(selectedClass)) {
+      showInfo('This class is outside the current active semester. Enrollment is read-only.');
+      return;
+    }
 
     const parsed = enrollmentKeySchema.safeParse({ enrollmentKey });
     if (!parsed.success) {
@@ -218,7 +282,7 @@ const ClassesScreen = () => {
     } finally {
       setJoining(false);
     }
-  }, [selectedClass, enrollmentKey, fetchData, navigation]);
+  }, [selectedClass, enrollmentKey, fetchData, navigation, isClassInteractionLocked]);
 
   // ── Navigation ───────────────────────────────────
 
@@ -232,9 +296,20 @@ const ClassesScreen = () => {
   // ── FlatList Callbacks ───────────────────────────
 
   const renderBrowseClass = useCallback(
-    ({ item }: { item: ClassItem }) => <BrowseClassCard item={item} onJoin={openJoinModal} />,
-    [openJoinModal]
+    ({ item }: { item: ClassItem }) => (
+      <BrowseClassCard
+        item={item}
+        onJoin={openJoinModal}
+        interactionDisabled={isClassInteractionLocked(item)}
+      />
+    ),
+    [openJoinModal, isClassInteractionLocked]
   );
+
+  const hasReadOnlySemesterItems = useMemo(() => {
+    if (!currentSemester) return false;
+    return browseClasses.some((item) => isClassInteractionLocked(item));
+  }, [browseClasses, currentSemester, isClassInteractionLocked]);
 
   const keyExtractor = useCallback((item: ClassItem) => item.id, []);
 
@@ -247,7 +322,12 @@ const ClassesScreen = () => {
       <View className="mb-5">
         <Text className="mb-3 text-lg font-semibold text-white">My Classes</Text>
         {myClasses.map((item) => (
-          <MyClassCard key={item.id} item={item} onPress={handleClassPress} />
+          <MyClassCard
+            key={item.id}
+            item={item}
+            onPress={handleClassPress}
+            interactionDisabled={isClassInteractionLocked(item)}
+          />
         ))}
         <Text className="mb-2 ml-1 mt-4 text-xs font-semibold text-gray-600">BROWSE CLASSES</Text>
       </View>
@@ -269,6 +349,16 @@ const ClassesScreen = () => {
             : 'Browse & join a class'}
         </Text>
       </View>
+
+      {hasReadOnlySemesterItems && (
+        <View className="mx-4 mb-3 mt-1 flex-row items-start gap-2 rounded-xl bg-amber-900/30 px-3 py-2.5">
+          <Feather name="clock" size={14} color="#FCD34D" style={{ marginTop: 1 }} />
+          <Text className="flex-1 text-xs text-amber-300">
+            Some classes are outside the current active semester. You can view them, but joining is
+            disabled.
+          </Text>
+        </View>
+      )}
 
       {/* Content */}
       {loading ? (

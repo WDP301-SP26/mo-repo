@@ -83,7 +83,11 @@ const ENDPOINTS = {
 
   DOCUMENTS: {
     GROUP_SUBMISSIONS: (groupId: string) => `/api/documents/group/${groupId}`,
+    GROUP_VERSIONS: (groupId: string) => `/api/documents/group/${groupId}/versions`,
     SUBMIT_FOR_GROUP: (groupId: string) => `/api/documents/group/${groupId}`,
+    SAVE_DRAFT_FOR_GROUP: (groupId: string) => `/api/documents/group/${groupId}/drafts`,
+    UPDATE_VERSION: (submissionId: string) => `/api/documents/${submissionId}`,
+    SUBMIT_VERSION: (submissionId: string) => `/api/documents/${submissionId}/submit`,
   },
 
   SEMESTERS: {
@@ -91,6 +95,10 @@ const ENDPOINTS = {
     CURRENT_WEEK: '/api/semesters/current-week',
     STUDENT_WARNINGS: '/api/semesters/current/compliance/student-warning',
     STUDENT_REVIEW_STATUS: '/api/semesters/current/reviews/student-status',
+    STUDENT_REVIEW_SCORES: '/api/semesters/current/reviews/student-scores',
+    GROUP_REVIEW_SESSIONS: (groupId: string) => `/api/semesters/groups/${groupId}/review-sessions`,
+    GROUP_REVIEW_SESSION_HISTORY: (groupId: string) =>
+      `/api/semesters/groups/${groupId}/review-session-history`,
   },
 
   NOTIFICATIONS: {
@@ -100,7 +108,7 @@ const ENDPOINTS = {
 
   CHAT: {
     LIST_CONVERSATIONS: '/api/chat/conversations',
-    CREATE_CONVERSATION: '/api/chat/conversations',
+    CREATE_GROUP_CONVERSATION: '/api/chat/group-conversations',
     CONVERSATION_DETAIL: (conversationId: string) => `/api/chat/conversations/${conversationId}`,
     LIST_MESSAGES: (conversationId: string) => `/api/chat/conversations/${conversationId}/messages`,
     SEND_MESSAGE: (conversationId: string) => `/api/chat/conversations/${conversationId}/messages`,
