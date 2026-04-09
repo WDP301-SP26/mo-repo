@@ -1,30 +1,30 @@
-import React, { useCallback, useState } from 'react';
-import {
-  View,
-  Text,
-  ScrollView,
-  TouchableOpacity,
-  TextInput,
-  StatusBar,
-  ActivityIndicator,
-  RefreshControl,
-  Linking,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@/components/icons';
+import type { RouteProp } from '@react-navigation/native';
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import type { RouteProp } from '@react-navigation/native';
+import { useCallback, useState } from 'react';
+import {
+    ActivityIndicator,
+    Linking,
+    RefreshControl,
+    ScrollView,
+    StatusBar,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import type { RootStackParamList } from '@/navigation/AppNavigator';
 import {
-  buildSrsTemplateMarkdown,
-  getGroupSubmissions,
-  saveGroupDraftVersion,
-  submitDocumentVersion,
-  updateDocumentVersion,
-  type DocumentSubmission,
+    getGroupSubmissions,
+    saveGroupDraftVersion,
+    submitDocumentVersion,
+    updateDocumentVersion,
+    type DocumentSubmission,
 } from '@/services/documentService';
+import { generateSrsReport } from '@/services/reportService';
 import { showError, showSuccess } from '@/utils/toast';
 import { documentSubmissionSchema, getZodErrorMessage } from '@/utils/validation/formSchemas';
 
@@ -44,6 +44,28 @@ const normalizeUrl = (rawUrl: string) => {
 };
 
 const hasHttpScheme = (value?: string | null) => /^https?:\/\//i.test(value || '');
+
+const isTrivialSrsMarkdown = (markdown: string) => {
+  const normalized = markdown.trim().toLowerCase();
+  if (!normalized) return true;
+
+  const placeholderSignals = [
+    '- fr-01:',
+    '- fr-02:',
+    '- uc-01:',
+    '- uc-02:',
+    '- purpose',
+    '- scope',
+    '- definitions',
+    '- entities',
+    '- relationships',
+    '- key screens',
+    '- navigation flow',
+  ];
+
+  const matchedSignals = placeholderSignals.filter((signal) => normalized.includes(signal));
+  return matchedSignals.length >= 5;
+};
 
 const StatusBadge = ({ status }: { status: string }) => (
   <View
@@ -206,13 +228,19 @@ const DocumentSubmissionsScreen = () => {
       setSubmitting(true);
       const nextVersion = (items[0]?.version_number || 0) + 1;
       const nextTitle = title.trim() || `SRS Version ${nextVersion}`;
-      const generatedMarkdown = buildSrsTemplateMarkdown(nextTitle);
+
+      const aiResponse = await generateSrsReport(groupId);
+      const generatedMarkdown = String(aiResponse?.markdown || '').trim();
+
+      if (isTrivialSrsMarkdown(generatedMarkdown)) {
+        throw new Error('AI output is still a placeholder template. Please enrich topic/Jira data and generate again.');
+      }
 
       const baseSubmissionId = items[0]?.id;
       const created = await saveGroupDraftVersion(groupId, {
         title: nextTitle,
         reference: reference.trim() || undefined,
-        change_summary: changeSummary.trim() || 'Generated initial SRS template draft',
+        change_summary: changeSummary.trim() || 'AI-generated SRS draft from topic and Jira context',
         content_markdown: generatedMarkdown,
         base_submission_id: baseSubmissionId,
       });
@@ -221,13 +249,13 @@ const DocumentSubmissionsScreen = () => {
       setTitle(created.title || nextTitle);
       setUrl(created.document_url || '');
       setReference(created.reference || '');
-      setChangeSummary(created.change_summary || 'Generated initial SRS template draft');
+      setChangeSummary(created.change_summary || 'AI-generated SRS draft from topic and Jira context');
       setContentMarkdown(created.content_markdown || generatedMarkdown);
 
-      showSuccess('Generated SRS draft successfully');
+      showSuccess('Generated AI SRS draft successfully');
       fetchSubmissions(true);
     } catch (error: any) {
-      showError(error?.response?.data?.message || 'Failed to generate draft');
+      showError(error?.response?.data?.message || error?.message || 'Failed to generate AI SRS draft');
     } finally {
       setSubmitting(false);
     }
