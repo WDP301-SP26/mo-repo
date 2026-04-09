@@ -46,6 +46,59 @@ const normalizeUrl = (rawUrl: string) => {
 
 const hasHttpScheme = (value?: string | null) => /^https?:\/\//i.test(value || '');
 
+const normalizeText = (value: string) =>
+  value
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const TOPIC_STOP_WORDS = new Set([
+  'the',
+  'and',
+  'for',
+  'with',
+  'from',
+  'that',
+  'this',
+  'project',
+  'system',
+  'app',
+  'application',
+  'de',
+  'tai',
+  'do',
+  'an',
+]);
+
+const extractTopicKeywords = (topicName: string) => {
+  return normalizeText(topicName)
+    .split(' ')
+    .filter((word) => word.length >= 3 && !TOPIC_STOP_WORDS.has(word));
+};
+
+const isMarkdownRelatedToTopic = (markdown: string, topicName: string) => {
+  const normalizedTopic = normalizeText(topicName);
+  if (!normalizedTopic) return false;
+
+  const normalizedMarkdown = normalizeText(markdown);
+  if (!normalizedMarkdown) return false;
+
+  if (normalizedMarkdown.includes(normalizedTopic)) {
+    return true;
+  }
+
+  const keywords = extractTopicKeywords(topicName);
+  if (keywords.length === 0) {
+    return false;
+  }
+
+  const matchedCount = keywords.filter((keyword) => normalizedMarkdown.includes(keyword)).length;
+  return matchedCount >= Math.min(2, keywords.length);
+};
+
 const isTrivialSrsMarkdown = (markdown: string) => {
   const normalized = markdown.trim().toLowerCase();
   if (!normalized) return true;
@@ -142,6 +195,10 @@ const DocumentSubmissionsScreen = () => {
   const [editingVersionId, setEditingVersionId] = useState<string | null>(null);
   const [submittingVersionId, setSubmittingVersionId] = useState<string | null>(null);
   const [loadError, setLoadError] = useState('');
+  const [groupName, setGroupName] = useState('My Group');
+  const [topicName, setTopicName] = useState('');
+
+  const hasTopicForGenerate = topicName.trim().length > 0;
 
   const fetchSubmissions = useCallback(
     async (isRefresh = false) => {
@@ -150,6 +207,14 @@ const DocumentSubmissionsScreen = () => {
         setLoadError('');
         const data = await getGroupSubmissions(groupId);
         setItems(data || []);
+
+        try {
+          const groupDetail = await getGroupById(groupId);
+          setGroupName(groupDetail?.name || 'My Group');
+          setTopicName(groupDetail?.topic?.name?.trim() || '');
+        } catch {
+          setTopicName('');
+        }
       } catch (error: any) {
         const message = error?.response?.data?.message || 'Failed to load submissions';
         setLoadError(message);
@@ -269,6 +334,11 @@ const DocumentSubmissionsScreen = () => {
   }, []);
 
   const handleGenerateDraft = useCallback(async () => {
+    if (!hasTopicForGenerate) {
+      showError('Please select a topic for this group before generating SRS.');
+      return;
+    }
+
     try {
       setSubmitting(true);
       const nextVersion = (items[0]?.version_number || 0) + 1;
@@ -280,14 +350,18 @@ const DocumentSubmissionsScreen = () => {
 
       const aiResponse = await generateSrsReport(groupId);
       let generatedMarkdown = String(aiResponse?.markdown || '').trim();
+      let usedFallback = false;
 
       if (isTrivialSrsMarkdown(generatedMarkdown)) {
-        const groupDetail = await getGroupById(groupId);
         generatedMarkdown = buildFallbackSrsMarkdown(
           nextTitle,
-          groupDetail?.name || 'My Group',
-          groupDetail?.topic_name || null
+          groupName,
+          topicName
         );
+        usedFallback = true;
+      } else if (!isMarkdownRelatedToTopic(generatedMarkdown, topicName)) {
+        generatedMarkdown = buildFallbackSrsMarkdown(nextTitle, groupName, topicName);
+        usedFallback = true;
       }
 
       const baseSubmissionId = items[0]?.id;
@@ -307,14 +381,29 @@ const DocumentSubmissionsScreen = () => {
       setChangeSummary(created.change_summary ?? nextChangeSummary);
       setContentMarkdown(created.content_markdown || generatedMarkdown);
 
-      showSuccess('Generated AI SRS draft successfully');
+      if (usedFallback) {
+        showSuccess('Generated SRS draft with topic-enforced fallback content');
+      } else {
+        showSuccess('Generated AI SRS draft successfully');
+      }
       fetchSubmissions(true);
     } catch (error: any) {
       showError(error?.response?.data?.message || error?.message || 'Failed to generate AI SRS draft');
     } finally {
       setSubmitting(false);
     }
-  }, [changeSummary, fetchSubmissions, groupId, items, reference, title, url]);
+  }, [
+    changeSummary,
+    fetchSubmissions,
+    groupId,
+    groupName,
+    hasTopicForGenerate,
+    items,
+    reference,
+    title,
+    topicName,
+    url,
+  ]);
 
   const handleOpenUrl = useCallback(async (rawUrl?: string | null) => {
     if (!rawUrl) {
@@ -402,6 +491,13 @@ const DocumentSubmissionsScreen = () => {
           <Text className="mb-3 text-xs leading-5 text-gray-500">
             Title is required. Reference, URL, markdown content and change summary are optional.
           </Text>
+          {!hasTopicForGenerate && (
+            <View className="mb-3 rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2.5">
+              <Text className="text-xs text-amber-200">
+                Please select a topic for this group first. SRS generation is disabled until topic is set.
+              </Text>
+            </View>
+          )}
 
           <Text className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-gray-500">
             Title
@@ -479,8 +575,8 @@ const DocumentSubmissionsScreen = () => {
           </TouchableOpacity>
           <TouchableOpacity
             onPress={handleGenerateDraft}
-            disabled={submitting || !!editingVersionId}
-            className={`mt-2 items-center rounded-xl border border-white/10 py-3 ${submitting || !!editingVersionId ? 'opacity-50' : ''}`}
+            disabled={submitting || !!editingVersionId || !hasTopicForGenerate}
+            className={`mt-2 items-center rounded-xl border border-white/10 py-3 ${submitting || !!editingVersionId || !hasTopicForGenerate ? 'opacity-50' : ''}`}
             activeOpacity={0.8}>
             <Text className="font-semibold text-gray-200">Generate SRS Draft</Text>
           </TouchableOpacity>
