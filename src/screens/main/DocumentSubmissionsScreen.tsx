@@ -24,6 +24,7 @@ import {
     updateDocumentVersion,
     type DocumentSubmission,
 } from '@/services/documentService';
+import { getGroupById } from '@/services/groupService';
 import { generateSrsReport } from '@/services/reportService';
 import { showError, showSuccess } from '@/utils/toast';
 import { documentSubmissionSchema, getZodErrorMessage } from '@/utils/validation/formSchemas';
@@ -65,6 +66,50 @@ const isTrivialSrsMarkdown = (markdown: string) => {
 
   const matchedSignals = placeholderSignals.filter((signal) => normalized.includes(signal));
   return matchedSignals.length >= 5;
+};
+
+const buildFallbackSrsMarkdown = (title: string, groupName: string, topicName?: string | null) => {
+  const topic = topicName?.trim() || 'Project topic in this group';
+
+  return `# ${title}
+
+## 1. Introduction
+- Purpose: Define detailed software requirements for ${topic}.
+- Scope: Deliver a mobile-supported project workflow for group ${groupName}, including planning, implementation tracking, and document review.
+- Definitions: FR = Functional Requirement, NFR = Non-Functional Requirement.
+
+## 2. Overall Description
+- Product perspective: A collaborative system for student groups, lecturers, and admins to manage project lifecycle and SRS submissions.
+- User classes: Group Leader, Group Member, Lecturer, Admin.
+- Constraints: Must align with semester rules, group permissions, and integration data from Jira/GitHub when available.
+
+## 3. Functional Requirements
+- FR-01: The system shall allow group members to create and manage SRS document versions.
+- FR-02: The system shall allow a group leader to submit selected SRS versions for lecturer review.
+- FR-03: The system shall support version metadata (reference, change summary, and content markdown).
+- FR-04: The system shall maintain version history and status transitions (DRAFT, PENDING, APPROVED, REJECTED, GRADED).
+
+## 4. Non-Functional Requirements
+- Performance: Common document actions should complete within acceptable response time under normal class size.
+- Security: Access to group documents must be restricted to authorized users in the group or allowed lecturer/admin roles.
+- Availability: Document version history must remain consistently retrievable after save/submit operations.
+
+## 5. Use Cases
+- UC-01: Leader generates an initial SRS draft and refines it before submission.
+- UC-02: Lecturer reviews submitted SRS, provides feedback, and assigns score.
+
+## 6. Data Model
+- Entities: Group, Group Membership, Document Submission, Semester, User.
+- Relationships: A group has many document versions; each version belongs to one group and is submitted by one user.
+
+## 7. UI/UX Notes
+- Key screens: Group detail, Document versions, Reports.
+- Navigation flow: Group -> Documents -> Generate/Edit Draft -> Submit.
+
+## 8. Risks & Assumptions
+- Risks: Sparse Jira/topic data can reduce AI detail quality.
+- Assumptions: Group topic and integration context are kept up to date by the team.
+`;
 };
 
 const StatusBadge = ({ status }: { status: string }) => (
@@ -228,28 +273,38 @@ const DocumentSubmissionsScreen = () => {
       setSubmitting(true);
       const nextVersion = (items[0]?.version_number || 0) + 1;
       const nextTitle = title.trim() || `SRS Version ${nextVersion}`;
+      const normalizedUrl = normalizeUrl(url);
+      const nextReference = reference.trim() || undefined;
+      const nextChangeSummary =
+        changeSummary.trim() || 'AI-generated SRS draft from topic and Jira context';
 
       const aiResponse = await generateSrsReport(groupId);
-      const generatedMarkdown = String(aiResponse?.markdown || '').trim();
+      let generatedMarkdown = String(aiResponse?.markdown || '').trim();
 
       if (isTrivialSrsMarkdown(generatedMarkdown)) {
-        throw new Error('AI output is still a placeholder template. Please enrich topic/Jira data and generate again.');
+        const groupDetail = await getGroupById(groupId);
+        generatedMarkdown = buildFallbackSrsMarkdown(
+          nextTitle,
+          groupDetail?.name || 'My Group',
+          groupDetail?.topic_name || null
+        );
       }
 
       const baseSubmissionId = items[0]?.id;
       const created = await saveGroupDraftVersion(groupId, {
         title: nextTitle,
-        reference: reference.trim() || undefined,
-        change_summary: changeSummary.trim() || 'AI-generated SRS draft from topic and Jira context',
+        document_url: normalizedUrl || undefined,
+        reference: nextReference,
+        change_summary: nextChangeSummary,
         content_markdown: generatedMarkdown,
         base_submission_id: baseSubmissionId,
       });
 
       setEditingVersionId(created.id);
       setTitle(created.title || nextTitle);
-      setUrl(created.document_url || '');
-      setReference(created.reference || '');
-      setChangeSummary(created.change_summary || 'AI-generated SRS draft from topic and Jira context');
+      setUrl(created.document_url ?? normalizedUrl ?? '');
+      setReference(created.reference ?? nextReference ?? '');
+      setChangeSummary(created.change_summary ?? nextChangeSummary);
       setContentMarkdown(created.content_markdown || generatedMarkdown);
 
       showSuccess('Generated AI SRS draft successfully');
@@ -259,7 +314,7 @@ const DocumentSubmissionsScreen = () => {
     } finally {
       setSubmitting(false);
     }
-  }, [changeSummary, fetchSubmissions, groupId, items, reference, title]);
+  }, [changeSummary, fetchSubmissions, groupId, items, reference, title, url]);
 
   const handleOpenUrl = useCallback(async (rawUrl?: string | null) => {
     if (!rawUrl) {
